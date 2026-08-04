@@ -8,6 +8,7 @@ import {
   where,
   orderBy,
   Timestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 
@@ -87,6 +88,37 @@ export const markNotificationAsRead = async (notificationId: string): Promise<No
     return { _id: notificationId, read: true } as Notification;
   } catch (error) {
     console.error('Error al marcar notificación como leída:', error);
+    throw error;
+  }
+};
+
+export const markAllNotificationsAsRead = async (): Promise<void> => {
+  try {
+    const ubicacion = localStorage.getItem('ubicacion');
+    let q;
+    if (ubicacion) {
+      q = query(
+        collection(db, NOTIFICATIONS_COLLECTION),
+        where('ubicacion', '==', ubicacion),
+        where('read', '==', false)
+      );
+    } else {
+      q = query(
+        collection(db, NOTIFICATIONS_COLLECTION),
+        where('read', '==', false)
+      );
+    }
+
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return;
+
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((docSnap) => {
+      batch.update(docSnap.ref, { read: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    console.error('Error al marcar todas como leídas:', error);
     throw error;
   }
 };

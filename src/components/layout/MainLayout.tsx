@@ -11,7 +11,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-[#f0f2f5] flex flex-col">
       <Navbar onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)} />
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar para desktop */}
@@ -34,7 +34,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
           </div>
         )}
 
-        <main className="flex-1 p-4 md:p-8 overflow-auto min-w-0">
+        <main className="flex-1 p-3 sm:p-4 md:p-8 overflow-auto min-w-0 max-w-full">
           {children}
         </main>
       </div>

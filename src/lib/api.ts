@@ -15,6 +15,9 @@ import {
   collectionGroup,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { logAuditAction } from '../features/audit/services/auditService';
+import { getGuatemalaDate, getGuatemalaStartOfDay, getGuatemalaEndOfDay } from './timezone';
+import { deductFromStock } from '../features/products/utils/stockMath';
 
 // ==========================================
 // Ubicaciones API (Firestore directo)
@@ -35,18 +38,61 @@ export const ubicacionesAPI = {
 
   createUbicacion: async (ubicacionData: any) => {
     const docRef = await addDoc(collection(db, 'ubicaciones'), ubicacionData);
+    
+    await logAuditAction(
+      'CREAR',
+      'Ubicación',
+      docRef.id,
+      `Se creó la ubicación ${ubicacionData.nombre}`
+    );
+
     return { _id: docRef.id, id: docRef.id, ...ubicacionData };
   },
 
   updateUbicacion: async (id: string, ubicacionData: any) => {
     const ref = doc(db, 'ubicaciones', id);
     await updateDoc(ref, ubicacionData);
+    
+    let targetName = ubicacionData.nombre;
+    if (!targetName) {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        targetName = snap.data().nombre;
+      }
+    }
+
+    await logAuditAction(
+      'ACTUALIZAR',
+      'Ubicación',
+      id,
+      `Se actualizó la ubicación ${targetName || 'Desconocida'}`
+    );
+
     return { _id: id, id, ...ubicacionData };
   },
 
-  deleteUbicacion: async (id: string) => {
-    await deleteDoc(doc(db, 'ubicaciones', id));
-    return { message: 'Ubicación eliminada' };
+  deleteUbicacion: async (id: string, reason: string) => {
+    const docRef = doc(db, 'ubicaciones', id);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      await addDoc(collection(db, 'historicoUbicaciones'), {
+        ...docSnap.data(),
+        _id: id,
+        id: id,
+        deletedAt: Timestamp.now(),
+        deletionReason: reason,
+      });
+      await deleteDoc(docRef);
+      
+      await logAuditAction(
+        'ELIMINAR',
+        'Ubicación',
+        id,
+        `Se envió al histórico la ubicación ${docSnap.data().nombre || 'Desconocida'}`,
+        reason
+      );
+    }
+    return { message: 'Ubicación enviada al Histórico' };
   },
 
   getUbicacionById: async (id: string) => {
@@ -130,7 +176,6 @@ export const productsAPI = {
   },
 
   updateStock: async (productId: string, quantity: number, saleType: 'unit' | 'blister' | 'box') => {
-    // Necesitamos encontrar el producto para saber su ubicación
     const ubicacionesSnapshot = await getDocs(collection(db, 'ubicaciones'));
     for (const ubicacionDoc of ubicacionesSnapshot.docs) {
       const productRef = doc(db, 'ubicaciones', ubicacionDoc.id, 'products', productId);
@@ -139,17 +184,36 @@ export const productsAPI = {
         const data = productSnap.data();
         const stock = { ...data.stock };
         const packaging = data.packaging || {};
+        const sellOptions = data.sellOptions || {};
 
-        // Calcular unidades a descontar
-        let unitsToDeduct = quantity;
-        if (saleType === 'blister') {
-          unitsToDeduct = quantity * (packaging.unitsPerBlister || 1);
-        } else if (saleType === 'box') {
-          unitsToDeduct = quantity * (packaging.unitsPerBlister || 1) * (packaging.blistersPerBox || 1);
+        const result = deductFromStock(
+          {
+            boxes: Number(stock.boxes || 0),
+            blisters: Number(stock.blisters || 0),
+            units: Number(stock.units || 0),
+          },
+          quantity,
+          saleType,
+          {
+            unitsPerBlister: Number(packaging.unitsPerBlister || 1),
+            blistersPerBox: Number(packaging.blistersPerBox || 1),
+            unitsPerBox: Number(packaging.unitsPerBox || 1),
+          },
+          {
+            unit: !!sellOptions.unit,
+            blister: !!sellOptions.blister,
+            box: !!sellOptions.box,
+          },
+        );
+
+        if (!result.ok) {
+          throw new Error(result.error || 'Stock insuficiente');
         }
 
-        stock.units = (stock.units || 0) - unitsToDeduct;
-        
+        stock.units = result.remaining.units;
+        stock.blisters = result.remaining.blisters;
+        stock.boxes = result.remaining.boxes;
+
         await updateDoc(productRef, { stock, updatedAt: Timestamp.now() });
         return { _id: productId, stock };
       }
@@ -175,13 +239,12 @@ export const reportsAPI = {
 
     if (snapshot.empty) {
       if (!ubicacion) throw new Error('No hay reporte activo');
-      // Crear un reporte nuevo para hoy
-      const now = new Date();
-      const endOfDay = new Date(now);
-      endOfDay.setHours(23, 59, 59, 999);
+      const todayStr = getGuatemalaDate();
+      const startOfDay = getGuatemalaStartOfDay(todayStr);
+      const endOfDay = getGuatemalaEndOfDay(todayStr);
 
       const newReport = {
-        startDate: Timestamp.fromDate(now),
+        startDate: Timestamp.fromDate(startOfDay),
         endDate: Timestamp.fromDate(endOfDay),
         sales: [],
         totalSales: 0,
@@ -201,12 +264,15 @@ export const reportsAPI = {
        let totalSales = 0;
        let totalProducts = 0;
        let allSales: any[] = [];
-       snapshot.docs.forEach(doc => {
-         const data = doc.data();
+       for (const docSnap of snapshot.docs) {
+         const data = docSnap.data();
          totalSales += data.totalSales || 0;
          totalProducts += data.totalProducts || 0;
-         allSales = [...allSales, ...(data.sales || [])];
-       });
+         
+         const salesSnap = await getDocs(collection(docSnap.ref, 'sales'));
+         const reportSales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+         allSales = [...allSales, ...reportSales];
+       }
        return {
          _id: 'combined-active',
          id: 'combined-active',
@@ -219,7 +285,11 @@ export const reportsAPI = {
     }
 
     const reportDoc = snapshot.docs[0];
-    return { _id: reportDoc.id, id: reportDoc.id, ...reportDoc.data() };
+    const data = reportDoc.data();
+    const salesSnap = await getDocs(collection(reportDoc.ref, 'sales'));
+    const sales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+
+    return { _id: reportDoc.id, id: reportDoc.id, ...data, sales };
   },
 
   getReportHistory: async (ubicacion?: string) => {
@@ -227,11 +297,19 @@ export const reportsAPI = {
       const reportsRef = collection(db, 'ubicaciones', ubicacion, 'reports');
       const q = query(reportsRef, where('status', '==', 'closed'));
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({
-        _id: doc.id,
-        id: doc.id,
-        ...doc.data(),
-      }));
+      
+      const reports = [];
+      for (const docSnap of snapshot.docs) {
+        const salesSnap = await getDocs(collection(docSnap.ref, 'sales'));
+        const sales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+        reports.push({
+          _id: docSnap.id,
+          id: docSnap.id,
+          ...docSnap.data(),
+          sales
+        });
+      }
+      return reports;
     } else {
       // Admin: buscar en todas las ubicaciones
       const ubicacionesSnap = await getDocs(collection(db, 'ubicaciones'));
@@ -240,9 +318,18 @@ export const reportsAPI = {
         const reportsRef = collection(db, 'ubicaciones', ubDoc.id, 'reports');
         const q = query(reportsRef, where('status', '==', 'closed'));
         const snapshot = await getDocs(q);
-        snapshot.docs.forEach(doc => {
-          allReports.push({ _id: doc.id, id: doc.id, ubicacionId: ubDoc.id, ...doc.data() });
-        });
+        
+        for (const docSnap of snapshot.docs) {
+          const salesSnap = await getDocs(collection(docSnap.ref, 'sales'));
+          const sales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+          allReports.push({ 
+            _id: docSnap.id, 
+            id: docSnap.id, 
+            ubicacionId: ubDoc.id, 
+            ...docSnap.data(),
+            sales 
+          });
+        }
       }
       return allReports;
     }
@@ -259,12 +346,11 @@ export const reportsAPI = {
 
     let reportRef;
     if (snapshot.empty) {
-      // Crear reporte si no existe
-      const now = new Date();
-      const endOfDay = new Date(now);
-      endOfDay.setHours(23, 59, 59, 999);
+      const todayStr = getGuatemalaDate();
+      const startOfDay = getGuatemalaStartOfDay(todayStr);
+      const endOfDay = getGuatemalaEndOfDay(todayStr);
       const newReportRef = await addDoc(reportsRef, {
-        startDate: Timestamp.fromDate(now),
+        startDate: Timestamp.fromDate(startOfDay),
         endDate: Timestamp.fromDate(endOfDay),
         sales: [],
         totalSales: 0,
@@ -339,10 +425,8 @@ export const reportsAPI = {
   getReportByDate: async (date: string, ubicacionParam?: string) => {
     const ubicacion = ubicacionParam || localStorage.getItem('ubicacion');
     
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = getGuatemalaStartOfDay(date);
+    const endOfDay = getGuatemalaEndOfDay(date);
 
     let q;
     if (ubicacion) {
@@ -367,12 +451,14 @@ export const reportsAPI = {
        let totalSales = 0;
        let totalProducts = 0;
        let allSales: any[] = [];
-       snapshot.docs.forEach(doc => {
-         const data = doc.data();
+       for (const docSnap of snapshot.docs) {
+         const data = docSnap.data();
          totalSales += data.totalSales || 0;
          totalProducts += data.totalProducts || 0;
-         allSales = [...allSales, ...(data.sales || [])];
-       });
+         const salesSnap = await getDocs(collection(docSnap.ref, 'sales'));
+         const reportSales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+         allSales = [...allSales, ...reportSales];
+       }
        return {
          _id: 'combined-' + date,
          id: 'combined-' + date,
@@ -385,16 +471,17 @@ export const reportsAPI = {
     }
 
     const reportDoc = snapshot.docs[0];
-    return { _id: reportDoc.id, id: reportDoc.id, ...reportDoc.data() };
+    const data = reportDoc.data();
+    const salesSnap = await getDocs(collection(reportDoc.ref, 'sales'));
+    const sales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+    return { _id: reportDoc.id, id: reportDoc.id, ...data, sales };
   },
 
   getReportByRange: async (startDate: string, endDate: string, ubicacionParam?: string) => {
     const ubicacion = ubicacionParam || localStorage.getItem('ubicacion');
     
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+    const start = getGuatemalaStartOfDay(startDate);
+    const end = getGuatemalaEndOfDay(endDate);
 
     let q;
     if (ubicacion) {
@@ -419,21 +506,5 @@ export const reportsAPI = {
       id: doc.id,
       ...doc.data(),
     }));
-  },
-
-  // PDF y Excel se manejarán via Cloud Functions (Paso 5)
-  generatePDF: async (reportId: string | null, startDate?: string, endDate?: string) => {
-    console.warn('Generación de PDF será migrada a Cloud Functions');
-    throw new Error('La generación de PDF se implementará via Cloud Functions');
-  },
-
-  generateDetailedPDF: async (report: any) => {
-    console.warn('Generación de PDF detallado será migrada a Cloud Functions');
-    throw new Error('La generación de PDF detallado se implementará via Cloud Functions');
-  },
-
-  generateExcel: async (reportId: string | null, startDate?: string, endDate?: string) => {
-    console.warn('Generación de Excel será migrada a Cloud Functions');
-    throw new Error('La generación de Excel se implementará via Cloud Functions');
-  },
+  }
 };

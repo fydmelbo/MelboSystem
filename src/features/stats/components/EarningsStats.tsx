@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import React from 'react';
+import AnimatedCounter from '../../../components/ui/AnimatedCounter';
+import { motion, AnimatePresence } from 'framer-motion';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 
 interface EarningsStatsProps {
   weeklyEarnings: number;
@@ -28,117 +31,130 @@ export default function EarningsStats({
   const weeklyChange = calculatePercentageChange(weeklyEarnings, previousWeekEarnings);
   const monthlyChange = calculatePercentageChange(monthlyEarnings, previousMonthEarnings);
 
+  const currentEarnings = view === 'weekly' ? weeklyEarnings : monthlyEarnings;
+  const currentChange = view === 'weekly' ? weeklyChange : monthlyChange;
+  const isPositive = currentChange >= 0;
+
+  const circumference = 2 * Math.PI * 40;
+  const firstHalfOffset = circumference * (1 - firstFifteenDaysEarnings / 100);
+  const secondHalfOffset = circumference * (1 - lastFifteenDaysEarnings / 100);
+
   return (
-    <div className="bg-white rounded-lg shadow p-4 w-80">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold text-gray-800"> Mensuales</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setView('weekly')}
-            className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${view === 'weekly'
-              ? 'bg-green-700 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden h-full">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h2 className="text-lg font-bold text-gray-900">Ganancias</h2>
+        <div className="flex gap-1 bg-gray-100 p-0.5 rounded-xl">
+          {(['weekly', 'monthly'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                view === v
+                  ? 'bg-white text-primary-600 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
-          >
-            Semanal
-          </button>
-          <button
-            onClick={() => setView('monthly')}
-            className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${view === 'monthly'
-              ? 'bg-green-700 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-          >
-            Mensual
-          </button>
+            >
+              {v === 'weekly' ? 'Semanal' : 'Mensual'}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="mb-4">
-        <p className="text-sm text-gray-600 mb-1">
-          {view === 'weekly' ? 'Esta Semana' : 'Este Mes'}
-        </p>
-        <div className="flex items-end gap-3">
-          <span className="text-2xl font-bold text-gray-900">
-            Q{view === 'weekly' ? weeklyEarnings?.toFixed(2) : monthlyEarnings?.toFixed(2)}
-          </span>
-          <span className={`text-sm font-medium ${(view === 'weekly' ? weeklyChange : monthlyChange) >= 0
-            ? 'text-green-600'
-            : 'text-red-600'
-            }`}>
-            {(view === 'weekly' ? weeklyChange : monthlyChange).toFixed(2)}%
-          </span>
-          <span className="text-sm text-gray-500">
-            del {view === 'weekly' ? 'semana' : 'mes'} anterior
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="relative">
-          <div className="flex items-center justify-center">
-            <svg className="w-24 h-24 transform -rotate-90">
-              <circle
-                className="text-gray-200"
-                strokeWidth="8"
-                stroke="currentColor"
-                fill="transparent"
-                r="40"
-                cx="48"
-                cy="48"
-              />
-              <circle
-                className="text-blue-500"
-                strokeWidth="8"
-                strokeDasharray={251.2}
-                strokeDashoffset={251.2 * (1 - firstFifteenDaysEarnings / 100)}
-                strokeLinecap="round"
-                stroke="currentColor"
-                fill="transparent"
-                r="40"
-                cx="48"
-                cy="48"
-              />
-            </svg>
-            <span className="absolute text-sm font-semibold">
-              {firstFifteenDaysEarnings?.toFixed(2)}%
+      <div className="p-6 space-y-6">
+        {/* Main metric */}
+        <div>
+          <p className="text-sm text-gray-500 mb-1">
+            {view === 'weekly' ? 'Esta Semana' : 'Este Mes'}
+          </p>
+          <div className="flex items-end gap-3">
+            <span className="text-3xl font-bold text-gray-900 tabular-nums">
+              Q<AnimatedCounter value={currentEarnings} decimals={2} />
             </span>
           </div>
-          <p className="text-sm text-center mt-2">Primeros 15 días</p>
-        </div>
-
-        <div className="relative">
-          <div className="flex items-center justify-center">
-            <svg className="w-24 h-24 transform -rotate-90">
-              <circle
-                className="text-gray-200"
-                strokeWidth="8"
-                stroke="currentColor"
-                fill="transparent"
-                r="40"
-                cx="48"
-                cy="48"
-              />
-              <circle
-                className="text-yellow-500"
-                strokeWidth="8"
-                strokeDasharray={251.2}
-                strokeDashoffset={251.2 * (1 - lastFifteenDaysEarnings / 100)}
-                strokeLinecap="round"
-                stroke="currentColor"
-                fill="transparent"
-                r="40"
-                cx="48"
-                cy="48"
-              />
-            </svg>
-            <span className="absolute text-sm font-semibold">
-              {lastFifteenDaysEarnings?.toFixed(2)}%
+          <div className="flex items-center gap-1.5 mt-2">
+            {isPositive ? (
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <TrendingDown className="w-4 h-4 text-red-500" />
+            )}
+            <span className={`text-sm font-semibold ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
+              {isPositive ? '+' : ''}{currentChange.toFixed(1)}%
+            </span>
+            <span className="text-sm text-gray-400">
+              vs. {view === 'weekly' ? 'semana' : 'mes'} anterior
             </span>
           </div>
-          <p className="text-sm text-center mt-2">Últimos 15 días</p>
+        </div>
+
+        {/* Donut charts */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="text-center">
+            <div className="relative inline-flex items-center justify-center">
+              <svg className="w-28 h-28 -rotate-90">
+                <circle
+                  className="text-gray-100"
+                  strokeWidth="8"
+                  stroke="currentColor"
+                  fill="transparent"
+                  r="40"
+                  cx="48"
+                  cy="48"
+                />
+                <circle
+                  className="text-blue-500"
+                  strokeWidth="8"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={firstHalfOffset}
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="transparent"
+                  r="40"
+                  cx="48"
+                  cy="48"
+                  style={{ transition: 'stroke-dashoffset 0.8s ease-out' }}
+                />
+              </svg>
+              <span className="absolute text-sm font-bold text-gray-900">
+                {firstFifteenDaysEarnings?.toFixed(0)}%
+              </span>
+            </div>
+            <p className="text-xs font-medium text-gray-500 mt-2">Primeros 15 días</p>
+          </div>
+
+          <div className="text-center">
+            <div className="relative inline-flex items-center justify-center">
+              <svg className="w-28 h-28 -rotate-90">
+                <circle
+                  className="text-gray-100"
+                  strokeWidth="8"
+                  stroke="currentColor"
+                  fill="transparent"
+                  r="40"
+                  cx="48"
+                  cy="48"
+                />
+                <circle
+                  className="text-amber-500"
+                  strokeWidth="8"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={secondHalfOffset}
+                  strokeLinecap="round"
+                  stroke="currentColor"
+                  fill="transparent"
+                  r="40"
+                  cx="48"
+                  cy="48"
+                  style={{ transition: 'stroke-dashoffset 0.8s ease-out' }}
+                />
+              </svg>
+              <span className="absolute text-sm font-bold text-gray-900">
+                {lastFifteenDaysEarnings?.toFixed(0)}%
+              </span>
+            </div>
+            <p className="text-xs font-medium text-gray-500 mt-2">Últimos 15 días</p>
+          </div>
         </div>
       </div>
     </div>
   );
-} 
+}

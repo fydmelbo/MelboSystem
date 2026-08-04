@@ -1,4 +1,4 @@
-import { Home, Pill, Users, ShoppingCart, FileText, LayoutDashboard, History, Truck, Pin, MapPin } from 'lucide-react';
+import { Home, Pill, Users, ShoppingCart, FileText, LayoutDashboard, History, Truck, Pin, MapPin, AlertTriangle } from 'lucide-react';
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../features/auth/context/AuthContext';
@@ -28,6 +28,13 @@ const getMenuItems = (role: string) => [
     label: 'Histórico',
     path: '/products/historico',
     color: 'text-amber-500'
+  }] : []),
+  // Revisión - para admin y admin_ubicacion
+  ...((role === 'admin' || role === 'admin_ubicacion') ? [{
+    icon: AlertTriangle,
+    label: 'Revisión de Importación',
+    path: '/products/review',
+    color: 'text-rose-500'
   }] : []),
   // Usuarios - para todos
   {
@@ -64,6 +71,13 @@ const getMenuItems = (role: string) => [
     path: '/ubicaciones',
     color: 'text-green-500'
   }] : []),
+  // Auditoria
+  ...(role === 'admin' ? [{
+    icon: FileText,
+    label: 'Auditoría',
+    path: '/auditoria',
+    color: 'text-blue-500'
+  }] : []),
   // Transferencia
   ...((role === 'admin' || role === 'admin_ubicacion') ? [{
     icon: Truck,
@@ -86,7 +100,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
   const menuItems = getMenuItems(user?.role || '');
 
   return (
-    <div className="w-64 h-screen bg-gradient-to-b from-blue-50 to-white border-r border-gray-200">
+    <div className="w-64 h-screen bg-white border-r border-gray-200">
       <nav className="space-y-1 p-4">
         {menuItems.filter(Boolean).map((item) => {
           const isActive = location.pathname === item.path;

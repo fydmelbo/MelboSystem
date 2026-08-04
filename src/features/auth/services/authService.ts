@@ -5,6 +5,7 @@ import { auth, db } from '../../../config/firebase';
 export interface UserProfile {
   uid: string;
   email: string;
+  name: string;
   role: string;
   ubicacion?: string;
 }
@@ -26,6 +27,7 @@ export const loginWithFirebase = async (email: string, password: string): Promis
     const userProfile: UserProfile = {
       uid: firebaseUser.uid,
       email: firebaseUser.email || email,
+      name: userData.name || userData.nombre || firebaseUser.displayName || email,
       role: userData.role || 'employee',
       ubicacion: userData.ubicacion || undefined,
     };

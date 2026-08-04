@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 
+export interface Payment {
+  type: 'efectivo' | 'TC' | 'transferencia';
+  amount: number;
+  change?: number;
+}
+
 interface PaymentDividerProps {
   total: number;
   onPaymentsChange: (payments: Payment[]) => void;
-}
-
-interface Payment {
-  type: 'efectivo' | 'TC' | 'transferencia';
-  amount: number;
 }
 
 const paymentTypes = [
@@ -36,15 +37,28 @@ export function PaymentDivider({ total, onPaymentsChange }: PaymentDividerProps)
   };
 
   const handleAmountChange = (type: string, amount: number) => {
-    const newPayments = payments.map(p => 
+    const newPayments = payments.map(p =>
       p.type === type ? { ...p, amount } : p
     );
     setPayments(newPayments);
-    
+
     const totalPaid = newPayments.reduce((sum, p) => sum + p.amount, 0);
     setRemainingAmount(total - totalPaid);
-    onPaymentsChange(newPayments);
+
+    const efectivoPayment = newPayments.find(p => p.type === 'efectivo');
+    if (efectivoPayment) {
+      const change = efectivoPayment.amount - total;
+      onPaymentsChange(newPayments.map(p =>
+        p.type === 'efectivo' ? { ...p, change: change >= 0 ? change : undefined } : p
+      ));
+    } else {
+      onPaymentsChange(newPayments);
+    }
   };
+
+  const efectivoPayment = payments.find(p => p.type === 'efectivo');
+  const efectivoChange = efectivoPayment && efectivoPayment.amount > 0 ? efectivoPayment.amount - total : null;
+  const hasEfectivo = selectedTypes.includes('efectivo');
 
   return (
     <div className="space-y-4">
@@ -73,18 +87,41 @@ export function PaymentDivider({ total, onPaymentsChange }: PaymentDividerProps)
               </span>
               <input
                 type="number"
+                step="0.01"
+                min="0"
                 value={payments.find(p => p.type === type)?.amount || ''}
-                onChange={(e) => handleAmountChange(type, Number(e.target.value))}
+                onChange={(e) => handleAmountChange(type, Number(e.target.value) || 0)}
                 className="w-32 px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500"
                 placeholder="Monto"
               />
             </div>
           ))}
 
+          {hasEfectivo && efectivoChange !== null && (
+            <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <div className="flex justify-between items-center">
+                <span className="font-medium text-gray-700">Vuelto (efectivo):</span>
+                {efectivoChange > 0 ? (
+                  <span className="text-lg font-bold text-green-600">
+                    Q{efectivoChange.toFixed(2)}
+                  </span>
+                ) : efectivoChange === 0 ? (
+                  <span className="text-lg font-bold text-blue-600">
+                    Pago exacto - Sin vuelto
+                  </span>
+                ) : (
+                  <span className="text-lg font-bold text-red-600">
+                    Falta Q{Math.abs(efectivoChange).toFixed(2)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-4 text-sm font-medium">
             <span className="w-24 text-gray-700">Restante:</span>
             <span className={`${remainingAmount === 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ${remainingAmount.toFixed(2)}
+              Q{remainingAmount.toFixed(2)}
             </span>
           </div>
         </div>

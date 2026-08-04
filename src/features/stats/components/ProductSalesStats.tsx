@@ -36,8 +36,6 @@ export default function ProductSalesStats({ products }: ProductSalesStatsProps) 
     }
   };
 
-  console.log(products);
-
   return (
     <div className="bg-white rounded-lg shadow">
       <button
@@ -102,17 +100,17 @@ export default function ProductSalesStats({ products }: ProductSalesStatsProps) 
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <span className="text-sm text-gray-900">
-                      {product.salesByType.unit}
+                      {product.salesByType?.unit ?? 0}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <span className="text-sm text-gray-900">
-                      {product.salesByType.blister}
+                      {product.salesByType?.blister ?? 0}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <span className="text-sm text-gray-900">
-                      {product.salesByType.box}
+                      {product.salesByType?.box ?? 0}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">

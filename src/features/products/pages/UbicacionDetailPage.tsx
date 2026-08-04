@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ubicacionesAPI } from '../../../lib/api';
+import { ubicacionesAPI, productsAPI } from '../../../lib/api';
 import { toast } from 'react-hot-toast';
 import MainLayout from '../../../components/layout/MainLayout';
 import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import DeleteLocationModal from '../components/DeleteLocationModal';
-import Pagination from '../components/Pagination';
+import Pagination from '../../../components/ui/Pagination';
 
 interface Ubicacion {
   _id: string;
@@ -53,7 +53,9 @@ export default function UbicacionDetailPage() {
 
   const loadUbicacion = async () => {
     try {
-      const data = await ubicacionesAPI.getUbicacionById(id!);
+      const data = (await ubicacionesAPI.getUbicacionById(id!)) as unknown as Ubicacion;
+      const productos = await productsAPI.getProducts(id!);
+      data.productosAsociados = productos as unknown as Producto[];
       setUbicacion(data);
       setFormData({
         nombre: data.nombre,
@@ -65,7 +67,6 @@ export default function UbicacionDetailPage() {
       navigate('/ubicaciones');
     }
   };
-  console.log(ubicacion);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,13 +80,13 @@ export default function UbicacionDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (reason: string) => {
     try {
-      await ubicacionesAPI.deleteUbicacion(id!);
-      toast.success('Ubicación eliminada exitosamente');
+      await ubicacionesAPI.deleteUbicacion(id!, reason);
+      toast.success('Ubicación enviada al Histórico exitosamente');
       navigate('/ubicaciones');
     } catch (error) {
-      toast.error('Error al eliminar ubicación');
+      toast.error('Error al enviar ubicación al Histórico');
     }
   };
 

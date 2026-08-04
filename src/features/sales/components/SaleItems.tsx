@@ -9,7 +9,6 @@ interface SaleItemsProps {
 
 export default function SaleItems({ items, onRemoveItem, onUpdateQuantity }: SaleItemsProps) {
   const formatCurrency = (amount: number) => `Q${amount.toFixed(2)}`;
-  console.log(items);
   const renderPromotionInfo = (item: SaleItem) => {
     if (!item.promotion) return null;
     

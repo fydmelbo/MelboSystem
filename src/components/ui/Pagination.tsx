@@ -1,5 +1,4 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import React from 'react';
 
 interface PaginationProps {
   currentPage: number;
@@ -21,7 +20,7 @@ export default function Pagination({
   const itemsPerPageOptions = [10, 50, 100];
 
   return (
-    <div className="mt-6 flex items-center justify-between gap-4 px-4 sm:px-0">
+    <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 px-2 sm:px-0">
       <div className="flex items-center gap-2">
         <button
           onClick={() => onPageChange(currentPage - 1)}
@@ -31,8 +30,8 @@ export default function Pagination({
           <ChevronLeft className="w-5 h-5" />
         </button>
 
-        <div className="text-sm text-gray-600">
-          Página {currentPage} de {totalPages}
+        <div className="text-sm text-gray-600 whitespace-nowrap">
+          {currentPage}/{totalPages}
         </div>
 
         <button
@@ -44,7 +43,7 @@ export default function Pagination({
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <select
           value={itemsPerPage}
           onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
@@ -56,7 +55,7 @@ export default function Pagination({
             </option>
           ))}
         </select>
-        <span className="text-sm text-gray-600">por página</span>
+        <span className="text-xs text-gray-500">/pág</span>
       </div>
     </div>
   );

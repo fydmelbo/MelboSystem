@@ -14,6 +14,7 @@ export interface ProductStock {
 export interface ProductPackaging {
   unitsPerBlister: number; // Unidades por blister
   blistersPerBox: number;  // Blisters por caja
+  unitsPerBox: number;     // Unidades por caja (directo, cuando no hay blister)
   description: string;     // "Frasco x 100 mL", "Blister x 10/Unidad"
 }
 
@@ -28,14 +29,13 @@ export interface Product {
   pharmaceuticalCompany: string; // Casa farmacéutica (desde colección 'casasFarmaceuticas')
   profitMargin: number;          // % de ganancia
   invoice: string;               // Número de factura
-  totalSales: number;            // Total de ventas
   prices: ProductPricing;
   stock: ProductStock;
   packaging: ProductPackaging;
   purchasePrices: {
-    unit: number;
-    blister: number;
-    box: number;
+    unit?: number;
+    blister?: number;
+    box?: number;
   };
   sellOptions: {
     unit: boolean;
@@ -45,4 +45,5 @@ export interface Product {
   location: {
     _id: any;
   };
+  needsReview?: boolean;
 }

@@ -1,10 +1,12 @@
-import { collection, doc, getDocs, getDoc, addDoc, updateDoc, deleteDoc, query, where, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, addDoc, updateDoc, deleteDoc, query, where, setDoc, Timestamp } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { db, auth } from '../../../config/firebase';
+import { logAuditAction } from '../../audit/services/auditService';
 
 export interface User {
   id: string;
+  name?: string;
   email: string;
   role: string;
   ubicacion?: {
@@ -15,8 +17,9 @@ export interface User {
 }
 
 export interface CreateUserData {
+  name: string;
   email: string;
-  password: string;
+  password?: string; // Made optional since it's not needed for updating
   role: string;
   ubicacion?: string | {
     _id?: string;
@@ -74,6 +77,10 @@ const userService = {
       secondaryApp = initializeApp(auth.app.options, `SecondaryApp_${Date.now()}`);
       const secondaryAuth = getAuth(secondaryApp);
 
+      if (!userData.password) {
+        throw new Error('La contraseña es obligatoria para crear un usuario');
+      }
+
       // Crear el usuario en Auth
       const userCredential = await createUserWithEmailAndPassword(secondaryAuth, userData.email, userData.password);
       const newUserId = userCredential.user.uid;
@@ -84,13 +91,22 @@ const userService = {
       // Guardar el perfil en Firestore usando el UID generado por Auth
       const userDocRef = doc(db, USERS_COLLECTION, newUserId);
       await setDoc(userDocRef, {
+        name: userData.name,
         email: userData.email,
         role: userData.role,
         ubicacion: ubicacionId || null,
       });
 
+      await logAuditAction(
+        'CREAR',
+        'Usuario',
+        newUserId,
+        `Se creó el usuario ${userData.email} con rol ${userData.role}`
+      );
+
       return {
         id: newUserId,
+        name: userData.name,
         email: userData.email,
         role: userData.role,
         ubicacion: userData.ubicacion as any,
@@ -112,6 +128,7 @@ const userService = {
       const userRef = doc(db, USERS_COLLECTION, id);
       const updateData: any = {};
 
+      if (userData.name) updateData.name = userData.name;
       if (userData.email) updateData.email = userData.email;
       if (userData.role) updateData.role = userData.role;
       if (userData.ubicacion !== undefined) {
@@ -123,20 +140,53 @@ const userService = {
       }
 
       await updateDoc(userRef, updateData);
+
+      let targetName = updateData.name || updateData.email;
+      if (!targetName) {
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          targetName = snap.data().name || snap.data().email;
+        }
+      }
+
+      await logAuditAction(
+        'ACTUALIZAR',
+        'Usuario',
+        id,
+        `Se actualizó el usuario ${targetName || 'Desconocido'}`
+      );
     } catch (error) {
       console.error('Error al actualizar usuario:', error);
       throw error;
     }
   },
 
-  // Eliminar un usuario
-  deleteUser: async (id: string): Promise<void> => {
+  // Eliminar un usuario (enviar a Histórico)
+  deleteUser: async (id: string, reason: string): Promise<void> => {
     try {
-      await deleteDoc(doc(db, USERS_COLLECTION, id));
-      // NOTA: Esto solo elimina de Firestore. 
-      // Para eliminar de Firebase Auth, necesitas una Cloud Function con Admin SDK.
+      const userRef = doc(db, USERS_COLLECTION, id);
+      const userSnap = await getDoc(userRef);
+      
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        await addDoc(collection(db, 'historicoUsuarios'), {
+          ...userData,
+          id: id,
+          deletedAt: Timestamp.now(),
+          deletionReason: reason,
+        });
+        await deleteDoc(userRef);
+
+        await logAuditAction(
+          'ELIMINAR',
+          'Usuario',
+          id,
+          `Se envió al histórico el usuario ${userData.email}`,
+          reason
+        );
+      }
     } catch (error) {
-      console.error('Error al eliminar usuario:', error);
+      console.error('Error al enviar usuario a Histórico:', error);
       throw error;
     }
   },

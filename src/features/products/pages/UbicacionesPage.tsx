@@ -5,7 +5,7 @@ import MainLayout from '../../../components/layout/MainLayout';
 import { Eye, Plus } from 'lucide-react';
 import DeleteLocationModal from '../components/DeleteLocationModal';
 import { useNavigate } from 'react-router-dom';
-import Pagination from '../components/Pagination';
+import Pagination from '../../../components/ui/Pagination';
 
 interface Ubicacion {
   _id: string;
@@ -33,7 +33,7 @@ export default function UbicacionesPage() {
 
   const loadUbicaciones = async () => {
     try {
-      const data = await ubicacionesAPI.getUbicaciones();
+      const data = (await ubicacionesAPI.getUbicaciones()) as unknown as Ubicacion[];
       setUbicaciones(data);
     } catch (error) {
       toast.error('Error al cargar ubicaciones');
@@ -61,16 +61,16 @@ export default function UbicacionesPage() {
     }
   };
 
-  const handleConfirmDelete = async () => {
+  const handleConfirmDelete = async (reason: string) => {
     if (!deletingUbicacion) return;
     
     try {
-      await ubicacionesAPI.deleteUbicacion(deletingUbicacion._id);
-      toast.success('Ubicación eliminada exitosamente');
+      await ubicacionesAPI.deleteUbicacion(deletingUbicacion._id, reason);
+      toast.success('Ubicación enviada al Histórico exitosamente');
       loadUbicaciones();
       setDeletingUbicacion(null);
     } catch (error) {
-      toast.error('Error al eliminar ubicación');
+      toast.error('Error al enviar ubicación al Histórico');
     }
   };
 
@@ -99,19 +99,20 @@ export default function UbicacionesPage() {
 
   return (
     <MainLayout>
-      <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Ubicaciones</h1>
+      <div className="bg-white rounded-lg shadow-md p-3 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Ubicaciones</h1>
           <button
             onClick={() => {
               setModalOpen(true);
               setEditingUbicacion(null);
               setFormData({ nombre: '', direccion: '', telefono: '' });
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
           >
             <Plus className="h-5 w-5" />
-            Agregar Ubicación
+            <span className="hidden sm:inline">Agregar Ubicación</span>
+            <span className="sm:hidden">Agregar</span>
           </button>
         </div>
 
@@ -157,63 +158,6 @@ export default function UbicacionesPage() {
         />
       </div>
 
-      {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">
-              { 'Agregar'} Ubicación
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre:</label>
-                <input
-                  type="text"
-                  value={formData.nombre}
-                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Dirección:</label>
-                <input
-                  type="text"
-                  value={formData.direccion}
-                  onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono:</label>
-                <input
-                  type="text"
-                  value={formData.telefono}
-                  onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-              <div className="flex justify-end gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-                >
-                  {editingUbicacion ? 'Actualizar' : 'Crear'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Modal de eliminación */}
       {deletingUbicacion && (
         <DeleteLocationModal
@@ -223,7 +167,7 @@ export default function UbicacionesPage() {
         />
       )}
 
-      {/* Modal de edición/creación existente */}
+      {/* Modal de creación/edición */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">

@@ -1,11 +1,18 @@
-// src/features/products/hooks/useProducts.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Product } from '../types/Product';
-import { getProducts } from '../services/productService';
+import { subscribeToProducts } from '../services/productService';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../../../features/auth/context/AuthContext';
 
-export function useProducts() {
+const normalize = (s?: string | null) =>
+  (s ?? '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+export function useProducts(ubicacionOverride?: string | null, filterByNeedsReview?: boolean) {
   const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,49 +22,59 @@ export function useProducts() {
   const [barcodeFilter, setBarcodeFilter] = useState('');
   const [pharmaceuticalFilter, setPharmaceuticalFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const hasReceivedInitial = useRef(false);
 
-  const fetchProducts = useCallback(async () => {
-    try {
-      setLoading(true);
-      const fetchedProducts = await getProducts(user?.ubicacion);
-      setProducts(fetchedProducts);
-    } catch (error) {
-      toast.error('Error al cargar los productos');
-      console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const ubicacion = ubicacionOverride !== undefined ? ubicacionOverride : user?.ubicacion;
 
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    setLoading(true);
+    hasReceivedInitial.current = false;
 
-  // Filtrar productos
+    const unsubscribe = subscribeToProducts(
+      ubicacion ?? undefined,
+      (fetchedProducts) => {
+        setProducts(fetchedProducts);
+        if (!hasReceivedInitial.current) {
+          hasReceivedInitial.current = true;
+          setLoading(false);
+        }
+      },
+      () => {
+        toast.error('Error al cargar los productos');
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [ubicacion]);
+
+  const normalizedNameFilter = normalize(nameFilter);
+  const normalizedBarcodeFilter = normalize(barcodeFilter);
+  const normalizedPharmaFilter = normalize(pharmaceuticalFilter);
+  const normalizedCategoryFilter = normalize(categoryFilter);
+
   const filteredProducts = products.filter((product) => {
-    const matchesName = product.name
-      ?.toLowerCase()
-      .includes(nameFilter.toLowerCase());
-    const matchesBarcode = (product.barcode || '')
-      .toLowerCase()
-      .includes(barcodeFilter.toLowerCase());
-    const matchesPharmaceutical = pharmaceuticalFilter === '' ||
-      (product.pharmaceuticalCompany || '').toLowerCase()
-        .includes(pharmaceuticalFilter.toLowerCase());
-    const matchesCategory = categoryFilter === '' ||
-      (product.category || '').toLowerCase() === categoryFilter.toLowerCase();
+    const matchesName = normalize(product.name).includes(normalizedNameFilter);
+    const matchesBarcode = normalize(product.barcode).includes(normalizedBarcodeFilter);
+    const matchesPharmaceutical = normalizedPharmaFilter === '' ||
+      normalize(product.pharmaceuticalCompany).includes(normalizedPharmaFilter);
+    const matchesCategory = normalizedCategoryFilter === '' ||
+      normalize(product.category).includes(normalizedCategoryFilter);
+      
+    const matchesNeedsReview = filterByNeedsReview === undefined ? true : 
+                               filterByNeedsReview ? product.needsReview === true : product.needsReview !== true;
 
-    return matchesName && matchesBarcode && matchesPharmaceutical && matchesCategory;
+    return matchesName && matchesBarcode && matchesPharmaceutical && matchesCategory && matchesNeedsReview;
   });
 
-  // Calcular paginación
   const totalItems = filteredProducts.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
   const currentProducts = filteredProducts.slice(startIndex, endIndex);
 
-  // Asegurar que la página actual es válida cuando cambian los filtros
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(1);
@@ -85,10 +102,6 @@ export function useProducts() {
     setCurrentPage(1);
   };
 
-  const refreshProducts = () => {
-    fetchProducts();
-  };
-
   return {
     products: currentProducts,
     loading,
@@ -106,6 +119,6 @@ export function useProducts() {
     handleCategoryFilterChange,
     handlePageChange,
     handleItemsPerPageChange,
-    refreshProducts,
+    refreshProducts: () => {},
   };
 }

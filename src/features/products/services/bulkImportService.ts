@@ -25,7 +25,7 @@ export interface ParsedProduct {
   barcode: string;
   name: string;
   sellOptions: { unit: boolean; blister: boolean; box: boolean };
-  packaging: { unitsPerBlister: number; blistersPerBox: number; description: string };
+  packaging: { unitsPerBlister: number; blistersPerBox: number; unitsPerBox: number; description: string };
   category: string;
   location: string;
   prices: { unit?: number; blister?: number; box?: number };
@@ -34,11 +34,21 @@ export interface ParsedProduct {
   entryDate: string;
   expirationDate: string;
   invoice: string;
-  totalSales: number;
   stock: { units: number; blisters: number; boxes: number; initial: number };
   pharmaceuticalCompany: string;
   paymentType: string;
   sheetName: string;
+  // Campo para rastrear si fue enriquecido desde Petapa
+  enrichmentSource?: 'petapa' | 'excel-only';
+}
+
+// Resultado del enriquecimiento con Petapa
+export interface EnrichmentResult {
+  enrichedProducts: ParsedProduct[];
+  matchedCount: number;   // Productos encontrados en Petapa
+  unmatchedCount: number; // Productos NO encontrados en Petapa
+  matchedNames: string[];   // Nombres de los que sí se encontraron
+  unmatchedNames: string[]; // Nombres de los que NO se encontraron
 }
 
 // ==========================================
@@ -69,6 +79,15 @@ function parsePercentage(value: any): number {
 function parseExcelDate(value: any): string {
   if (!value || value === '-' || value === '') return '';
 
+  // Si es un Date object (de cellDates: true en XLSX)
+  if (value instanceof Date) {
+    // Usar getFullYear/getMonth/getDate para evitar problemas de timezone
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   // Si es un número (serial date de Excel)
   if (typeof value === 'number') {
     const date = XLSX.SSF.parse_date_code(value);
@@ -89,10 +108,14 @@ function parseExcelDate(value: any): string {
     return `${year}-${month}-${day}`;
   }
 
-  // Intentar parsear como Date directamente
-  const d = new Date(str);
+  // Intentar parsear como string ISO o similar — usar local timezone
+  // Agregar T12:00:00 para evitar que se interprete como UTC midnight y cambie de día
+  const d = new Date(str + 'T12:00:00');
   if (!isNaN(d.getTime())) {
-    return d.toISOString().split('T')[0];
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   return '';
@@ -127,21 +150,23 @@ function parseProductRow(row: any, sheetName: string): ParsedProduct | null {
   const category = cleanString(row['CATEGORÍA'] || row['CATEGORIA'] || row['categoria'] || '');
   const location = cleanString(row['UBICACIÓN'] || row['UBICACION'] || row['ubicacion'] || '');
   
-  const priceBox = parseNumber(row['PRECIO CAJA'] || row['PRECIO_CAJA']);
-  const priceBlister = parseNumber(row['PRECIO BLIS'] || row['PRECIO_BLIS'] || row['PRECIO BLISTER'] || row['PRECIO_BLISTER']);
-  const priceUnit = parseNumber(row['PRECIO UN'] || row['PRECIO_UN'] || row['PRECIO UNIDAD'] || row['PRECIO_UNIDAD']);
+  // IMPORTANTE: En el Excel de la farmacia, las columnas "PRECIO" son los costos de compra
+  // y las columnas "COSTO" son los precios de venta al público
+  const purchaseBox = parseNumber(row['PRECIO CAJA'] || row['PRECIO_CAJA']);
+  const purchaseBlister = parseNumber(row['PRECIO BLIS'] || row['PRECIO_BLIS'] || row['PRECIO BLISTER'] || row['PRECIO_BLISTER']);
+  const purchaseUnit = parseNumber(row['PRECIO UN'] || row['PRECIO_UN'] || row['PRECIO UNIDAD'] || row['PRECIO_UNIDAD']);
   
   const profitMargin = parsePercentage(row['% GANACIA'] || row['%_GANACIA'] || row['% GANANCIA'] || row['%_GANANCIA']);
   
-  const costBox = parseNumber(row['COSTO CAJA'] || row['COSTO_CAJA']);
-  const costBlister = parseNumber(row['COSTO BLIS'] || row['COSTO_BLIS'] || row['COSTO BLISTER'] || row['COSTO_BLISTER']);
-  const costUnit = parseNumber(row['COSTO UNITARI'] || row['COSTO_UNITARI'] || row['COSTO UNITARIO'] || row['COSTO_UNITARIO']);
+  // COSTO UNITARIO/BLIS/CAJA = precio de venta al público
+  const saleBox = parseNumber(row['COSTO CAJA'] || row['COSTO_CAJA']);
+  const saleBlister = parseNumber(row['COSTO BLIS'] || row['COSTO_BLIS'] || row['COSTO BLISTER'] || row['COSTO_BLISTER']);
+  const saleUnit = parseNumber(row['COSTO UNITARI'] || row['COSTO_UNITARI'] || row['COSTO UNITARIO'] || row['COSTO_UNITARIO']);
   
   const entryDate = parseExcelDate(row['FECHA INGRESO'] || row['FECHA_INGRESO']);
   const expirationDate = parseExcelDate(row['FECHA DE VENCIMIENTO'] || row['FECHA_DE_VENCIMIENTO'] || row['FECHA DE\nVENCIMIENTO']);
   
   const invoice = cleanString(row['FACTURA'] || row['factura'] || '');
-  const totalSales = parseNumber(row['Total de ventas'] || row['Total_de_ventas'] || row['TOTAL DE VENTAS'] || 0);
   
   const stockInitial = parseNumber(row['STOCK INICIAL'] || row['STOCK_INICIAL'] || 0);
   const stockFinal = parseNumber(row['STOCK final'] || row['STOCK_final'] || row['STOCK FINAL'] || row['STOCK_FINAL'] || 0);
@@ -159,20 +184,19 @@ function parseProductRow(row: any, sheetName: string): ParsedProduct | null {
     barcode,
     name,
     sellOptions: { unit: sellUnit, blister: sellBlister, box: sellBox },
-    packaging: { unitsPerBlister: 0, blistersPerBox: 0, description: packagingDesc },
+    packaging: { unitsPerBlister: 0, blistersPerBox: 0, unitsPerBox: 0, description: packagingDesc },
     category,
     location,
     prices: {
-      unit: priceUnit || undefined,
-      blister: priceBlister || undefined,
-      box: priceBox || undefined,
+      unit: saleUnit || undefined,
+      blister: saleBlister || undefined,
+      box: saleBox || undefined,
     },
-    purchasePrices: { unit: costUnit, blister: costBlister, box: costBox },
+    purchasePrices: { unit: purchaseUnit, blister: purchaseBlister, box: purchaseBox },
     profitMargin,
     entryDate,
     expirationDate,
     invoice,
-    totalSales,
     stock: { units: stockFinal, blisters: 0, boxes: 0, initial: stockInitial },
     pharmaceuticalCompany: pharmaCompany,
     paymentType,
@@ -244,6 +268,307 @@ export async function parseExcelFile(file: File): Promise<{
     reader.onerror = () => reject(new Error('Error leyendo el archivo'));
     reader.readAsArrayBuffer(file);
   });
+}
+
+// ==========================================
+// Parser específico para Excel de San Jorge
+// Hoja: "traslados a zona 12"
+// ==========================================
+
+function parseSanJorgeRow(row: any): ParsedProduct | null {
+  // La columna del nombre en este Excel es un espacio literal ' '
+  const name = cleanString(row[' '] || row['NOMBRE DE PRODUCTO'] || '');
+  if (!name) return null;
+
+  // Solo importar filas con inventario positivo en San Jorge
+  const sanJorgeStock = parseNumber(row['Inventario San Jorge']);
+  if (sanJorgeStock <= 0) return null;
+
+  // Fecha de vencimiento SIEMPRE del Excel de San Jorge
+  const expirationDate = parseExcelDate(row['vencimiento'] || '');
+
+  // Precio de venta y costo del Excel
+  const precioVenta = parseNumber(row['PRECIO DE VENTA']);
+  const costoUnitario = parseNumber(row['Precio unitario COSTO']);
+
+  // Margen de ganancia (viene como decimal, ej: 0.48 = 48%)
+  const marginDecimal = parseNumber(row['__EMPTY']);
+  const profitMargin = marginDecimal > 0 ? Math.round(marginDecimal * 100 * 100) / 100 : 0;
+
+  // Categoría del Excel
+  const category = cleanString(row['CATEGORIA'] || '');
+
+  // Casa farmacéutica del Excel
+  const pharmaceuticalCompany = cleanString(row['CASA FARMACEUTICA'] || '');
+
+  // Tipo de pago: 'excento' o 'gravado'
+  const geRaw = cleanString(row['Excento/Gravado'] || row['Ex/Gra'] || '');
+  let paymentType = 'gravado';
+  if (geRaw.toLowerCase().includes('excento') || geRaw.toLowerCase().includes('exento')) {
+    paymentType = 'excento';
+  }
+
+  // Número de factura
+  const invoice = cleanString(row['factura'] || '');
+
+  // Distribución (NO es empaquetado, es descripción de presentación)
+  const distribucion = cleanString(row['Distribución'] || '');
+
+  // Fecha de ingreso: no viene en el Excel San Jorge, usar fecha actual
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const entryDate = `${year}-${month}-${day}`;
+
+  return {
+    barcode: '',  // Se llenará desde Petapa si existe
+    name,
+    sellOptions: { unit: true, blister: false, box: false }, // Default: solo unidad, se sobrescribe con Petapa
+    packaging: {
+      unitsPerBlister: 0,
+      blistersPerBox: 0,
+      unitsPerBox: 0,
+      description: distribucion,
+    },
+    category: category || 'General',
+    location: '',
+    prices: {
+      unit: precioVenta || undefined,
+    },
+    purchasePrices: {
+      unit: costoUnitario,
+      blister: 0,
+      box: 0,
+    },
+    profitMargin,
+    entryDate,
+    expirationDate,
+    invoice: String(invoice),
+    stock: {
+      units: sanJorgeStock,
+      blisters: 0,
+      boxes: 0,
+      initial: sanJorgeStock,
+    },
+    pharmaceuticalCompany,
+    paymentType,
+    sheetName: 'junio 2026',
+    enrichmentSource: 'excel-only',
+  };
+}
+
+/**
+ * Parsea el archivo Excel específico de San Jorge.
+ * Lee la hoja "traslados a zona 12" y filtra solo productos con inventario > 0.
+ */
+export async function parseSanJorgeExcelFile(file: File): Promise<{
+  products: ParsedProduct[];
+  categories: string[];
+  companies: string[];
+  sheetNames: string[];
+}> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+
+        const sheetNames = workbook.SheetNames;
+        const allProducts: ParsedProduct[] = [];
+        const categoriesSet = new Set<string>();
+        const companiesSet = new Set<string>();
+
+        // Buscar la hoja "junio 2026" (o similar con 'junio')
+        const targetSheetName = sheetNames.find(
+          s => s.toLowerCase().includes('junio')
+        ) || sheetNames[0];
+
+        const sheet = workbook.Sheets[targetSheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+        for (const row of rows) {
+          const product = parseSanJorgeRow(row);
+          if (product) {
+            allProducts.push(product);
+            if (product.category && product.category !== 'General') {
+              categoriesSet.add(product.category);
+            }
+            if (product.pharmaceuticalCompany) {
+              companiesSet.add(product.pharmaceuticalCompany);
+            }
+          }
+        }
+
+        resolve({
+          products: allProducts,
+          categories: [...categoriesSet],
+          companies: [...companiesSet],
+          sheetNames,
+        });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(new Error('Error leyendo el archivo'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ==========================================
+// Obtener productos de Petapa para cruce
+// ==========================================
+
+/**
+ * Consulta TODOS los productos de una ubicación (ej. Petapa) en Firestore
+ * y retorna un Map indexado por nombre en minúsculas para búsqueda rápida.
+ */
+export async function fetchLocationProductsMap(
+  locationId: string
+): Promise<Map<string, any>> {
+  const productsMap = new Map<string, any>();
+
+  try {
+    const productsRef = collection(db, 'ubicaciones', locationId, 'products');
+    const productsSnap = await getDocs(productsRef);
+
+    productsSnap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.name) {
+        // Indexar por nombre normalizado (minúsculas, sin espacios extra)
+        const normalizedName = data.name.toLowerCase().trim().replace(/\s+/g, ' ');
+        productsMap.set(normalizedName, data);
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching products from location for enrichment:', error);
+  }
+
+  return productsMap;
+}
+
+// ==========================================
+// Enriquecer productos de San Jorge con datos de Petapa
+// ==========================================
+
+/**
+ * Recorre la lista de productos parseados del Excel de San Jorge
+ * y los enriquece con datos de Petapa según la matriz de campos del plan.
+ * 
+ * Campos que se copian de Petapa (si existe):
+ * - barcode, sellOptions, packaging (completo), prices (blister/box),
+ *   purchasePrices (blister/box), category, pharmaceuticalCompany,
+ *   paymentType, profitMargin
+ * 
+ * Campos que SIEMPRE vienen del Excel de San Jorge:
+ * - name, expirationDate, stock, entryDate
+ * 
+ * Campos donde el Excel sobrescribe si tiene valor:
+ * - prices.unit (PRECIO DE VENTA), purchasePrices.unit (Precio unitario COSTO)
+ */
+export function enrichSanJorgeProducts(
+  products: ParsedProduct[],
+  petapaMap: Map<string, any>
+): EnrichmentResult {
+  const matchedNames: string[] = [];
+  const unmatchedNames: string[] = [];
+
+  const enrichedProducts = products.map(product => {
+    const normalizedName = product.name.toLowerCase().trim().replace(/\s+/g, ' ');
+    const petapaProduct = petapaMap.get(normalizedName);
+
+    if (petapaProduct) {
+      matchedNames.push(product.name);
+
+      // Guardar precios/costos originales del Excel de San Jorge
+      const excelPriceUnit = product.prices.unit;
+      const excelCostUnit = product.purchasePrices.unit;
+
+      // --- Campos copiados de Petapa ---
+
+      // Código de barras
+      product.barcode = petapaProduct.barcode || '';
+
+      // Opciones de venta (cómo se vende: unidad, blister, caja)
+      if (petapaProduct.sellOptions) {
+        product.sellOptions = {
+          unit: petapaProduct.sellOptions.unit ?? true,
+          blister: petapaProduct.sellOptions.blister ?? false,
+          box: petapaProduct.sellOptions.box ?? false,
+        };
+      }
+
+      // Empaquetado (unidades por blister, blisters por caja, etc.)
+      if (petapaProduct.packaging) {
+        product.packaging = {
+          unitsPerBlister: petapaProduct.packaging.unitsPerBlister ?? 0,
+          blistersPerBox: petapaProduct.packaging.blistersPerBox ?? 0,
+          unitsPerBox: petapaProduct.packaging.unitsPerBox ?? 0,
+          description: petapaProduct.packaging.description || product.packaging.description || '',
+        };
+      }
+
+      // Precios de venta: copiar blister/box de Petapa, unit del Excel si existe
+      if (petapaProduct.prices) {
+        product.prices = {
+          unit: excelPriceUnit || petapaProduct.prices.unit || undefined,
+          blister: petapaProduct.prices.blister || undefined,
+          box: petapaProduct.prices.box || undefined,
+        };
+      }
+
+      // Costos de compra: copiar blister/box de Petapa, unit del Excel si existe
+      if (petapaProduct.purchasePrices) {
+        product.purchasePrices = {
+          unit: excelCostUnit || petapaProduct.purchasePrices.unit || 0,
+          blister: petapaProduct.purchasePrices.blister || 0,
+          box: petapaProduct.purchasePrices.box || 0,
+        };
+      }
+
+      // Categoría: preferir Petapa si tiene, sino mantener Excel
+      if (petapaProduct.category) {
+        product.category = petapaProduct.category;
+      }
+
+      // Casa farmacéutica: preferir Petapa si tiene, sino mantener Excel
+      if (petapaProduct.pharmaceuticalCompany) {
+        product.pharmaceuticalCompany = petapaProduct.pharmaceuticalCompany;
+      }
+
+      // Tipo de pago: preferir Petapa
+      if (petapaProduct.paymentType) {
+        product.paymentType = petapaProduct.paymentType;
+      }
+
+      // Margen de ganancia: preferir Petapa si tiene
+      if (petapaProduct.profitMargin !== undefined && petapaProduct.profitMargin !== null) {
+        product.profitMargin = petapaProduct.profitMargin;
+      }
+
+      product.enrichmentSource = 'petapa';
+    } else {
+      unmatchedNames.push(product.name);
+      product.enrichmentSource = 'excel-only';
+    }
+
+    // Campos que NUNCA se copian de Petapa (siempre del Excel / San Jorge):
+    // - name (ya viene del Excel)
+    // - expirationDate (ya viene del Excel)
+    // - stock (ya viene del Excel)
+    // - entryDate (ya se asignó fecha actual)
+
+    return product;
+  });
+
+  return {
+    enrichedProducts,
+    matchedCount: matchedNames.length,
+    unmatchedCount: unmatchedNames.length,
+    matchedNames,
+    unmatchedNames,
+  };
 }
 
 // ==========================================
@@ -325,14 +650,22 @@ export async function importProductsToFirestore(
             category: product.category,
             sellOptions: product.sellOptions,
             packaging: product.packaging,
-            prices: product.prices,
-            purchasePrices: product.purchasePrices,
+            prices: {
+              ...(product.prices.unit ? { unit: Math.round(product.prices.unit * 100) / 100 } : {}),
+              ...(product.prices.blister ? { blister: Math.round(product.prices.blister * 100) / 100 } : {}),
+              ...(product.prices.box ? { box: Math.round(product.prices.box * 100) / 100 } : {}),
+            },
+            purchasePrices: {
+              ...(product.purchasePrices.unit ? { unit: Math.round(product.purchasePrices.unit * 100) / 100 } : {}),
+              ...(product.purchasePrices.blister ? { blister: Math.round(product.purchasePrices.blister * 100) / 100 } : {}),
+              ...(product.purchasePrices.box ? { box: Math.round(product.purchasePrices.box * 100) / 100 } : {}),
+            },
             profitMargin: product.profitMargin,
             invoice: product.invoice,
-            totalSales: product.totalSales,
             stock: product.stock, // Reemplaza el stock con el del Excel
             pharmaceuticalCompany: product.pharmaceuticalCompany,
             paymentType: product.paymentType,
+            needsReview: product.enrichmentSource === 'excel-only',
             updatedAt: Timestamp.now(),
           };
 
@@ -362,16 +695,24 @@ export async function importProductsToFirestore(
             category: product.category,
             sellOptions: product.sellOptions,
             packaging: product.packaging,
-            prices: product.prices,
-            purchasePrices: product.purchasePrices,
+            prices: {
+              ...(product.prices.unit ? { unit: Math.round(product.prices.unit * 100) / 100 } : {}),
+              ...(product.prices.blister ? { blister: Math.round(product.prices.blister * 100) / 100 } : {}),
+              ...(product.prices.box ? { box: Math.round(product.prices.box * 100) / 100 } : {}),
+            },
+            purchasePrices: {
+              ...(product.purchasePrices.unit ? { unit: Math.round(product.purchasePrices.unit * 100) / 100 } : {}),
+              ...(product.purchasePrices.blister ? { blister: Math.round(product.purchasePrices.blister * 100) / 100 } : {}),
+              ...(product.purchasePrices.box ? { box: Math.round(product.purchasePrices.box * 100) / 100 } : {}),
+            },
             profitMargin: product.profitMargin,
             entryDate: product.entryDate,
             expirationDate: product.expirationDate,
             invoice: product.invoice,
-            totalSales: product.totalSales,
             stock: product.stock,
             pharmaceuticalCompany: product.pharmaceuticalCompany,
             paymentType: product.paymentType,
+            needsReview: product.enrichmentSource === 'excel-only',
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           };
@@ -423,4 +764,42 @@ export async function importProductsToFirestore(
   }
 
   return result;
+}
+
+// ==========================================
+// Eliminar TODOS los productos de todas las ubicaciones
+// ==========================================
+
+export async function deleteAllProducts(
+  onProgress?: (current: number, total: number) => void
+): Promise<{ deleted: number }> {
+  const ubicacionesSnap = await getDocs(collection(db, 'ubicaciones'));
+  let totalDeleted = 0;
+  let totalToDelete = 0;
+
+  // Primero contar todos los productos
+  const allProductRefs: any[] = [];
+  for (const ubDoc of ubicacionesSnap.docs) {
+    const productsRef = collection(db, 'ubicaciones', ubDoc.id, 'products');
+    const productsSnap = await getDocs(productsRef);
+    productsSnap.docs.forEach(d => allProductRefs.push(d.ref));
+  }
+  totalToDelete = allProductRefs.length;
+
+  if (totalToDelete === 0) {
+    return { deleted: 0 };
+  }
+
+  // Eliminar en lotes de 450
+  const BATCH_SIZE = 450;
+  for (let i = 0; i < allProductRefs.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db);
+    const chunk = allProductRefs.slice(i, i + BATCH_SIZE);
+    chunk.forEach(ref => batch.delete(ref));
+    await batch.commit();
+    totalDeleted += chunk.length;
+    onProgress?.(totalDeleted, totalToDelete);
+  }
+
+  return { deleted: totalDeleted };
 }

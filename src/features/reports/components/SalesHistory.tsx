@@ -1,5 +1,6 @@
 import React from 'react';
 import { Report } from '../types/Report';
+import { formatGuatemalaDate } from '../../../lib/timezone';
 
 interface SalesHistoryProps {
   reports: Report[];
@@ -22,7 +23,7 @@ export default function SalesHistory({ reports }: SalesHistoryProps) {
           {reports.map((report, index) => (
             <tr key={index}>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {new Date(report.startDate).toLocaleDateString()}
+                {formatGuatemalaDate(report.startDate)}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 {report.sales.length}
@@ -31,7 +32,7 @@ export default function SalesHistory({ reports }: SalesHistoryProps) {
                 {report.totalProducts}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                ${report.totalSales.toFixed(2)}
+                Q{report.totalSales.toFixed(2)}
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${

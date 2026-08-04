@@ -1,9 +1,19 @@
 import { useState, useRef, useCallback } from 'react';
-import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, ArrowRightLeft } from 'lucide-react';
 import React from 'react';
-import { parseExcelFile, importProductsToFirestore, ParsedProduct, ImportResult } from '../services/bulkImportService';
+import {
+  parseExcelFile,
+  parseSanJorgeExcelFile,
+  importProductsToFirestore,
+  fetchLocationProductsMap,
+  enrichSanJorgeProducts,
+  ParsedProduct,
+  ImportResult,
+  EnrichmentResult,
+} from '../services/bulkImportService';
 import { ubicacionesAPI } from '../../../lib/api';
 import { toast } from 'react-hot-toast';
+import Button from '../../../components/ui/Button';
 
 interface BulkImportModalProps {
   onClose: () => void;
@@ -35,16 +45,25 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
   const [updateExisting, setUpdateExisting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- San Jorge mode ---
+  const [sanJorgeMode, setSanJorgeMode] = useState(false);
+  const [enrichWithPetapa, setEnrichWithPetapa] = useState(true);
+  const [enrichmentResult, setEnrichmentResult] = useState<EnrichmentResult | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [referenceLocation, setReferenceLocation] = useState('');
+
   // Cargar ubicaciones al montar
   React.useEffect(() => {
     const fetchUbicaciones = async () => {
       try {
         const data = await ubicacionesAPI.getUbicaciones();
         setUbicaciones(data);
-        // Auto-seleccionar PETAPA si existe
+        // Auto-seleccionar PETAPA como destino si existe
         const petapa = data.find((u: Ubicacion) => u.nombre.toUpperCase().includes('PETAPA'));
         if (petapa) {
           setSelectedLocation(petapa._id);
+          // También como ubicación de referencia para enriquecimiento
+          setReferenceLocation(petapa._id);
         }
       } catch (error) {
         console.error('Error cargando ubicaciones:', error);
@@ -63,34 +82,62 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
     setParsing(true);
 
     try {
-      const parsed = await parseExcelFile(selectedFile);
-      setParsedProducts(parsed.products);
-      setCategories(parsed.categories);
-      setCompanies(parsed.companies);
-      
-      // Filtrar hojas que no sean catálogos
-      const dataSheets = parsed.sheetNames.filter(name => {
-        const lowerName = name.toLowerCase();
-        return lowerName !== 'listas' && lowerName !== 'lista';
-      });
-      setSheetNames(parsed.sheetNames);
-      
-      // Por defecto seleccionar hojas que digan "base de datos"
-      const defaultSelected = dataSheets.filter(name => 
-        name.toLowerCase().includes('base de datos') || name.toLowerCase().includes('base_de_datos')
-      );
-      // Si no hay ninguna con "base de datos", seleccionar todas las de datos
-      setSelectedSheets(defaultSelected.length > 0 ? defaultSelected : dataSheets);
+      if (sanJorgeMode) {
+        // Modo San Jorge: parser especial
+        const parsed = await parseSanJorgeExcelFile(selectedFile);
+        setParsedProducts(parsed.products);
+        setCategories(parsed.categories);
+        setCompanies(parsed.companies);
+        setSheetNames(parsed.sheetNames);
+        setSelectedSheets(['junio 2026']);
 
-      setStep('preview');
-      toast.success(`Se leyeron los datos del archivo`);
+        // Enriquecer con Petapa automáticamente si está activado
+        if (enrichWithPetapa && referenceLocation) {
+          setEnriching(true);
+          try {
+            const petapaMap = await fetchLocationProductsMap(referenceLocation);
+            const result = enrichSanJorgeProducts(parsed.products, petapaMap);
+            setParsedProducts(result.enrichedProducts);
+            setEnrichmentResult(result);
+            toast.success(`${result.matchedCount} productos enriquecidos desde Petapa, ${result.unmatchedCount} sin coincidencia`);
+          } catch (err) {
+            console.error('Error enriqueciendo productos:', err);
+            toast.error('Error al enriquecer con datos de Petapa');
+          } finally {
+            setEnriching(false);
+          }
+        }
+
+        setStep('preview');
+        toast.success(`${parsed.products.length} productos de San Jorge listos`);
+      } else {
+        // Modo normal (original)
+        const parsed = await parseExcelFile(selectedFile);
+        setParsedProducts(parsed.products);
+        setCategories(parsed.categories);
+        setCompanies(parsed.companies);
+        
+        const dataSheets = parsed.sheetNames.filter(name => {
+          const lowerName = name.toLowerCase();
+          return lowerName !== 'listas' && lowerName !== 'lista';
+        });
+        setSheetNames(parsed.sheetNames);
+        
+        const defaultSelected = dataSheets.filter(name => 
+          name.toLowerCase().includes('base de datos') || name.toLowerCase().includes('base_de_datos')
+        );
+        setSelectedSheets(defaultSelected.length > 0 ? defaultSelected : dataSheets);
+
+        setStep('preview');
+        toast.success(`Se leyeron los datos del archivo`);
+      }
     } catch (error) {
       console.error('Error parseando archivo:', error);
       toast.error('Error al leer el archivo Excel');
     } finally {
       setParsing(false);
     }
-  }, []);
+  }, [sanJorgeMode, enrichWithPetapa, referenceLocation]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -241,6 +288,56 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
                 }}
               />
               <p className="text-xs text-gray-400 mt-4">Formatos soportados: .xlsx, .xls</p>
+
+              {/* San Jorge Mode Toggle */}
+              <div className="w-full max-w-md mt-6 p-4 bg-indigo-50 rounded-xl border border-indigo-200">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sanJorgeMode}
+                    onChange={(e) => setSanJorgeMode(e.target.checked)}
+                    className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div className="flex flex-col">
+                    <span className="font-medium text-indigo-900 flex items-center gap-2">
+                      <ArrowRightLeft className="h-4 w-4" />
+                      Modo San Jorge (Inventario)
+                    </span>
+                    <span className="text-sm text-indigo-700 mt-1">
+                      Activa este modo para importar desde el Excel de control de inventario de San Jorge.
+                      Se leerá la hoja &quot;traslados a zona 12&quot; y se enriquecerán los datos (código de barras, opciones de venta, empaque) desde Petapa.
+                    </span>
+                  </div>
+                </label>
+                {sanJorgeMode && (
+                  <div className="mt-3 ml-7 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enrichWithPetapa}
+                        onChange={(e) => setEnrichWithPetapa(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600"
+                      />
+                      <span className="text-sm text-indigo-800">Enriquecer con datos de Petapa</span>
+                    </label>
+                    {enrichWithPetapa && (
+                      <div>
+                        <label className="block text-xs text-indigo-700 mb-1">Ubicación de referencia:</label>
+                        <select
+                          value={referenceLocation}
+                          onChange={(e) => setReferenceLocation(e.target.value)}
+                          className="w-full px-2 py-1 text-sm border rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="">Selecciona...</option>
+                          {ubicaciones.map((ub) => (
+                            <option key={ub._id} value={ub._id}>{ub.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -254,9 +351,42 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
                   <p className="font-medium text-green-800">{file?.name}</p>
                   <p className="text-sm text-green-600">
                     {productsToImport.length} productos listos para importar
+                    {sanJorgeMode && ' (Modo San Jorge)'}
                   </p>
                 </div>
               </div>
+
+              {/* Enrichment Stats (San Jorge mode only) */}
+              {sanJorgeMode && enrichmentResult && (
+                <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-200">
+                  <h3 className="font-medium text-indigo-900 flex items-center gap-2 mb-3">
+                    <ArrowRightLeft className="h-4 w-4" />
+                    Resultado del enriquecimiento con Petapa
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 bg-green-100 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-green-700">{enrichmentResult.matchedCount}</p>
+                      <p className="text-xs text-green-600">Encontrados en Petapa</p>
+                    </div>
+                    <div className="p-3 bg-amber-100 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-amber-700">{enrichmentResult.unmatchedCount}</p>
+                      <p className="text-xs text-amber-600">Sin coincidencia (valores por defecto)</p>
+                    </div>
+                  </div>
+                  {enrichmentResult.unmatchedCount > 0 && (
+                    <details className="mt-3">
+                      <summary className="text-xs text-amber-700 cursor-pointer hover:text-amber-900">
+                        Ver {enrichmentResult.unmatchedCount} productos sin coincidencia
+                      </summary>
+                      <div className="mt-2 max-h-32 overflow-y-auto text-xs text-amber-800 bg-amber-50 rounded p-2 space-y-1">
+                        {enrichmentResult.unmatchedNames.map((name, i) => (
+                          <div key={i}>• {name}</div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
 
               {/* Sheet Selection */}
               <div className="p-4 bg-white rounded-xl border border-gray-200">
@@ -362,7 +492,8 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
                     <thead className="bg-gray-100">
                       <tr>
                         <th className="px-3 py-2 text-left font-semibold">#</th>
-                        <th className="px-3 py-2 text-left font-semibold">Hoja</th>
+                        {sanJorgeMode && <th className="px-3 py-2 text-left font-semibold">Fuente</th>}
+                        {!sanJorgeMode && <th className="px-3 py-2 text-left font-semibold">Hoja</th>}
                         <th className="px-3 py-2 text-left font-semibold">Código</th>
                         <th className="px-3 py-2 text-left font-semibold">Nombre</th>
                         <th className="px-3 py-2 text-left font-semibold">Categoría</th>
@@ -378,7 +509,16 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
                       {productsToImport.slice(0, 20).map((p, idx) => (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-3 py-2 text-gray-500">{idx + 1}</td>
-                          <td className="px-3 py-2 text-blue-600 font-medium">{p.sheetName}</td>
+                          {sanJorgeMode && (
+                            <td className="px-3 py-2">
+                              {p.enrichmentSource === 'petapa' ? (
+                                <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-medium">Petapa</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-medium">Excel</span>
+                              )}
+                            </td>
+                          )}
+                          {!sanJorgeMode && <td className="px-3 py-2 text-blue-600 font-medium">{p.sheetName}</td>}
                           <td className="px-3 py-2 font-mono">{p.barcode || '-'}</td>
                           <td className="px-3 py-2 max-w-[200px] truncate">{p.name}</td>
                           <td className="px-3 py-2">{p.category || '-'}</td>
@@ -501,40 +641,37 @@ export default function BulkImportModal({ onClose, onComplete }: BulkImportModal
         <div className="flex justify-between items-center px-6 py-4 border-t bg-gray-50">
           {step === 'preview' && (
             <>
-              <button
+              <Button
+                variant="outline"
                 onClick={() => { setStep('upload'); setFile(null); setParsedProducts([]); }}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors font-medium"
               >
                 ← Cambiar archivo
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleImport}
                 disabled={!selectedLocation || productsToImport.length === 0}
-                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-medium hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                icon={<Upload className="h-4 w-4" />}
               >
-                <Upload className="h-4 w-4" />
                 Importar {productsToImport.length} productos
-              </button>
+              </Button>
             </>
           )}
           {step === 'done' && (
             <div className="w-full flex justify-center">
-              <button
+              <Button
+                variant="primary"
                 onClick={handleDone}
-                className="px-6 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
               >
                 Cerrar y actualizar lista
-              </button>
+              </Button>
             </div>
           )}
           {step === 'upload' && (
             <div className="w-full flex justify-end">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors font-medium"
-              >
+              <Button variant="outline" onClick={onClose}>
                 Cancelar
-              </button>
+              </Button>
             </div>
           )}
         </div>

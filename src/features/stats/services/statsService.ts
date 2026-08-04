@@ -5,6 +5,8 @@ import {
   where,
   Timestamp,
   collectionGroup,
+  doc,
+  getDoc,
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { toast } from 'react-hot-toast';
@@ -81,9 +83,9 @@ const getSalesFromReports = async (ubicacion: string | null, startDate: Date, en
   return allSales;
 };
 
-export const getTopSellingProducts = async (period: 'day' | 'week' | 'month'): Promise<TopSellingProduct[]> => {
+export const getTopSellingProducts = async (period: 'day' | 'week' | 'month', ubicacion?: string | null): Promise<TopSellingProduct[]> => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const startDate = new Date(now);
@@ -98,7 +100,7 @@ export const getTopSellingProducts = async (period: 'day' | 'week' | 'month'): P
       startDate.setHours(0, 0, 0, 0);
     }
 
-    const sales = await getSalesFromReports(ubicacion, startDate, now);
+    const sales = await getSalesFromReports(ubicacionFilter, startDate, now);
 
     // Agregar por producto
     const productMap = new Map<string, TopSellingProduct>();
@@ -134,14 +136,14 @@ export const getTopSellingProducts = async (period: 'day' | 'week' | 'month'): P
   }
 };
 
-export const getMonthlySalesStats = async (): Promise<MonthlySalesData[]> => {
+export const getMonthlySalesStats = async (ubicacion?: string | null): Promise<MonthlySalesData[]> => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    const sales = await getSalesFromReports(ubicacion, startOfYear, now);
+    const sales = await getSalesFromReports(ubicacionFilter, startOfYear, now);
 
     // Agrupar por mes
     const monthlyMap = new Map<number, MonthlySalesData>();
@@ -165,15 +167,15 @@ export const getMonthlySalesStats = async (): Promise<MonthlySalesData[]> => {
   }
 };
 
-export const getProductsSalesStats = async () => {
+export const getProductsSalesStats = async (ubicacion?: string | null) => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    const sales = await getSalesFromReports(ubicacion, thirtyDaysAgo, now);
+    const sales = await getSalesFromReports(ubicacionFilter, thirtyDaysAgo, now);
 
     const productStats: Record<string, { name: string; totalSold: number; revenue: number }> = {};
     for (const sale of sales) {
@@ -196,24 +198,60 @@ export const getProductsSalesStats = async () => {
   }
 };
 
-export const getEarningsStats = async () => {
+export const getEarningsStats = async (ubicacion?: string | null) => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    const sales = await getSalesFromReports(ubicacion, thirtyDaysAgo, now);
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 7);
+
+    const fourteenDaysAgo = new Date(now);
+    fourteenDaysAgo.setDate(now.getDate() - 14);
+
+    const previousWeekStart = new Date(now);
+    previousWeekStart.setDate(now.getDate() - 14);
+
+    const previousMonthStart = new Date(now);
+    previousMonthStart.setDate(now.getDate() - 60);
+
+    const fifteenDaysAgo = new Date(now);
+    fifteenDaysAgo.setDate(now.getDate() - 15);
+
+    // Current period sales (last 30 days)
+    const sales = await getSalesFromReports(ubicacionFilter, thirtyDaysAgo, now);
     const totalEarnings = sales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
 
+    // Current week sales (last 7 days)
+    const currentWeekSales = await getSalesFromReports(ubicacionFilter, sevenDaysAgo, now);
+    const weeklyEarnings = currentWeekSales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
+
+    // Previous week sales (14 to 7 days ago)
+    const previousWeekSales = await getSalesFromReports(ubicacionFilter, previousWeekStart, sevenDaysAgo);
+    const previousWeekEarnings = previousWeekSales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
+
+    // Previous month sales (60 to 30 days ago)
+    const previousMonthSales = await getSalesFromReports(ubicacionFilter, previousMonthStart, thirtyDaysAgo);
+    const previousMonthEarnings = previousMonthSales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
+
+    // First and last 15 days
+    const firstFifteenSales = sales.filter((sale: any) => {
+      const saleDate = sale.createdAt?.toDate ? sale.createdAt.toDate() : new Date(sale.createdAt);
+      return saleDate >= fifteenDaysAgo;
+    });
+    const firstFifteenDaysEarnings = firstFifteenSales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
+    const lastFifteenDaysEarnings = totalEarnings - firstFifteenDaysEarnings;
+
     return {
-      weeklyEarnings: totalEarnings / 4,
+      weeklyEarnings,
       monthlyEarnings: totalEarnings,
-      previousWeekEarnings: (totalEarnings / 4) * 0.9,
-      previousMonthEarnings: totalEarnings * 0.8,
-      firstFifteenDaysEarnings: totalEarnings / 2,
-      lastFifteenDaysEarnings: totalEarnings / 2,
+      previousWeekEarnings,
+      previousMonthEarnings,
+      firstFifteenDaysEarnings,
+      lastFifteenDaysEarnings,
       totalEarnings,
       salesCount: sales.length
     };
@@ -224,9 +262,9 @@ export const getEarningsStats = async () => {
   }
 };
 
-export const getFinancialMetrics = async (period = 'month') => {
+export const getFinancialMetrics = async (period = 'month', ubicacion?: string | null) => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const startDate = new Date(now);
@@ -238,9 +276,23 @@ export const getFinancialMetrics = async (period = 'month') => {
       startDate.setFullYear(now.getFullYear() - 1);
     }
 
-    const sales = await getSalesFromReports(ubicacion, startDate, now);
+    const sales = await getSalesFromReports(ubicacionFilter, startDate, now);
     const totalRevenue = sales.reduce((acc: number, sale: any) => acc + (sale.total || 0), 0);
-    const totalCost = totalRevenue * 0.6;
+
+    // Calculate real cost from product purchasePrices
+    let totalCost = 0;
+    for (const sale of sales) {
+      for (const item of (sale.items || [])) {
+        const costPrice = item.purchasePrice || 0;
+        totalCost += costPrice * (item.quantity || 0);
+      }
+    }
+
+    // If no purchase price data available, estimate at 60% of revenue
+    if (totalCost === 0 && totalRevenue > 0) {
+      totalCost = totalRevenue * 0.6;
+    }
+
     const contributionMargin = totalRevenue - totalCost;
     const marginPercentage = totalRevenue > 0 ? (contributionMargin / totalRevenue) * 100 : 0;
 
@@ -261,15 +313,15 @@ export const getFinancialMetrics = async (period = 'month') => {
   }
 };
 
-export const getDailySalesStats = async (): Promise<DailySalesData[]> => {
+export const getDailySalesStats = async (ubicacion?: string | null): Promise<DailySalesData[]> => {
   try {
-    const ubicacion = localStorage.getItem('ubicacion') || null;
+    const ubicacionFilter = ubicacion !== undefined ? ubicacion : (localStorage.getItem('ubicacion') || null);
 
     const now = new Date();
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(now.getDate() - 30);
 
-    const sales = await getSalesFromReports(ubicacion, thirtyDaysAgo, now);
+    const sales = await getSalesFromReports(ubicacionFilter, thirtyDaysAgo, now);
 
     // Agrupar por día
     const dailyMap = new Map<string, DailySalesData>();

@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const userProfile: UserProfile = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || '',
+              name: userData.name || userData.nombre || firebaseUser.displayName || firebaseUser.email || '',
               role: userData.role || 'employee',
               ubicacion: userData.ubicacion || undefined,
             };
@@ -43,6 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             // Guardar en localStorage para que los servicios puedan filtrar
             localStorage.setItem('role', userData.role || 'employee');
+            localStorage.setItem('userName', userProfile.name);
+            localStorage.setItem('userEmail', userProfile.email);
             if (userData.ubicacion) {
               localStorage.setItem('ubicacion', userData.ubicacion);
             } else {

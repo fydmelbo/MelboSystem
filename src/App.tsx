@@ -9,12 +9,15 @@ import ReportsPage from './features/reports/pages/ReportsPage';
 import AdminPanel from './features/stats/pages/AdminPanel';
 import React from 'react';
 import HistoricoPage from './features/products/pages/HistoricoPage';
+import ReviewProductsPage from './features/products/pages/ReviewProductsPage';
 import UbicacionDetailPage from './features/products/pages/UbicacionDetailPage';
 import { TransferView } from './features/products/components/TransferView';
 import PromotionsPage from './features/promotions/pages/PromotionsPage';
 import { AuthProvider } from './features/auth/context/AuthContext';
 import ProtectedRoute from './features/auth/components/ProtectedRoute';
 import UsersPage from './features/users/pages/UsersPage';
+import AuditoriaPage from './features/audit/pages/AuditoriaPage';
+
 function App() {
   return (
     <BrowserRouter>
@@ -62,6 +65,11 @@ function App() {
               <HistoricoPage />
             </ProtectedRoute>
           } />
+          <Route path="/products/review" element={
+            <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion']}>
+              <ReviewProductsPage />
+            </ProtectedRoute>
+          } />
           <Route path="/transfer" element={
             <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion']}>
               <TransferView />
@@ -75,6 +83,11 @@ function App() {
           <Route path="/users" element={
             <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion']}>
               <UsersPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/auditoria" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AuditoriaPage />
             </ProtectedRoute>
           } />
           <Route path="/" element={<Navigate to="/login" replace />} />

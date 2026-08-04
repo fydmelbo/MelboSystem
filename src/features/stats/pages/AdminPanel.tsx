@@ -1,19 +1,54 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useStats } from '../hooks/useStats';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { Loader2, TrendingUp, Package, DollarSign, Users } from 'lucide-react';
+import { ResponsiveBar } from '@nivo/bar';
+import { Loader2, TrendingUp, Package, DollarSign, Tag, Building2, ShoppingCart, BarChart3 } from 'lucide-react';
 import MainLayout from '../../../components/layout/MainLayout';
 import React from 'react';
 import MonthlySalesChart from '../components/MonthlySalesChart';
 import ProductSalesStats from '../components/ProductSalesStats';
-import { getProductsSalesStats, getEarningsStats, getFinancialMetrics, DailySalesData } from '../services/statsService';
+import { getProductsSalesStats, getEarningsStats, getFinancialMetrics } from '../services/statsService';
 import EarningsStats from '../components/EarningsStats';
 import FinancialMetrics from '../components/FinancialMetrics';
 import DailySalesChart from '../components/DailySalesChart';
+import CatalogManager from '../../products/components/CatalogManager';
+import AnimatedCounter from '../../../components/ui/AnimatedCounter';
+import { StatCardSkeleton, ChartSkeleton } from '../../../components/ui/Skeleton';
+import { motion } from 'framer-motion';
+import {
+  getCategories,
+  addCategory,
+  updateCategory,
+  deleteCategory,
+  Category,
+  getPharmaceuticalCompanies,
+  addPharmaceuticalCompany,
+  updatePharmaceuticalCompany,
+  deletePharmaceuticalCompany,
+  PharmaceuticalCompany,
+} from '../../products/services/catalogService';
+import { useAuth } from '../../auth/context/AuthContext';
+import { ubicacionesAPI } from '../../../lib/api';
 
+type TabId = 'dashboard' | 'categories' | 'companies';
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.1, duration: 0.4, ease: 'easeOut' },
+  }),
+};
 
 export default function AdminPanel() {
-  const { topProducts, monthlyData, loading, selectedPeriod, setSelectedPeriod } = useStats();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [selectedUbicacion, setSelectedUbicacion] = useState<string>('');
+  const [ubicaciones, setUbicaciones] = useState<Array<{ _id: string; nombre: string }>>([]);
+
+  const ubicacionFilter = isAdmin ? (selectedUbicacion || null) : (user?.ubicacion || null);
+  const { topProducts, monthlyData, loading, selectedPeriod, setSelectedPeriod } = useStats(ubicacionFilter);
   const [productStats, setProductStats] = useState<any[]>([]);
   const [loadingStats, setLoadingStats] = useState(true);
   const [earningsData, setEarningsData] = useState({
@@ -32,15 +67,19 @@ export default function AdminPanel() {
     dailyMarginTrend: [] as any[],
     topProducts: [] as any[]
   });
-  const [dailySalesData, setDailySalesData] = useState<DailySalesData[]>([]);
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [companies, setCompanies] = useState<PharmaceuticalCompany[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadingCompanies, setLoadingCompanies] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [stats, earnings, financial,] = await Promise.all([
-          getProductsSalesStats(),
-          getEarningsStats(),
-          getFinancialMetrics()
+        const [stats, earnings, financial] = await Promise.all([
+          getProductsSalesStats(ubicacionFilter),
+          getEarningsStats(ubicacionFilter),
+          getFinancialMetrics('month', ubicacionFilter)
         ]);
         setProductStats(stats);
         setEarningsData(earnings);
@@ -49,8 +88,8 @@ export default function AdminPanel() {
           totalCost: 0,
           contributionMargin: 0,
           marginPercentage: 0,
-          dailyMarginTrend: [] as any[],
-          topProducts: [] as any[]
+          dailyMarginTrend: [],
+          topProducts: []
         });
       } catch (error) {
         console.error('Error al cargar estadísticas:', error);
@@ -58,191 +97,329 @@ export default function AdminPanel() {
         setLoadingStats(false);
       }
     };
-
+    setLoadingStats(true);
     fetchData();
+  }, [ubicacionFilter]);
+
+  const loadCategories = useCallback(async () => {
+    setLoadingCategories(true);
+    try { setCategories(await getCategories()); } catch {} finally { setLoadingCategories(false); }
   }, []);
+
+  const loadCompanies = useCallback(async () => {
+    setLoadingCompanies(true);
+    try { setCompanies(await getPharmaceuticalCompanies()); } catch {} finally { setLoadingCompanies(false); }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'categories') loadCategories();
+    if (activeTab === 'companies') loadCompanies();
+  }, [activeTab, loadCategories, loadCompanies]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      ubicacionesAPI.getUbicaciones().then(setUbicaciones).catch(() => {});
+    }
+  }, [isAdmin]);
+
+  const totalSales = topProducts.reduce((sum, p) => sum + p.totalAmount, 0);
+  const totalUnits = topProducts.reduce((sum, p) => sum + p.totalUnits, 0);
+  const avgPerSale = topProducts.length > 0 ? totalSales / topProducts.length : 0;
+
+  const tabs: { id: TabId; label: string; icon: any; adminOnly?: boolean }[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
+    { id: 'categories', label: 'Categorías', icon: Tag, adminOnly: true },
+    { id: 'companies', label: 'Casas Farmacéuticas', icon: Building2, adminOnly: true },
+  ];
+
+  const visibleTabs = tabs.filter(tab => !tab.adminOnly || isAdmin);
+
+  const kpiCards = [
+    { label: 'Ventas Totales', value: totalSales, prefix: 'Q', format: 'currency', icon: TrendingUp, color: 'from-blue-500 to-blue-600', bgColor: 'bg-blue-50', iconColor: 'text-blue-600' },
+    { label: 'Productos Vendidos', value: totalUnits, icon: ShoppingCart, color: 'from-emerald-500 to-emerald-600', bgColor: 'bg-emerald-50', iconColor: 'text-emerald-600' },
+    { label: 'Promedio/Venta', value: avgPerSale, prefix: 'Q', format: 'currency', icon: DollarSign, color: 'from-purple-500 to-purple-600', bgColor: 'bg-purple-50', iconColor: 'text-purple-600' },
+    { label: 'Diferentes', value: topProducts.length, icon: Package, color: 'from-amber-500 to-amber-600', bgColor: 'bg-amber-50', iconColor: 'text-amber-600' },
+  ];
 
   return (
     <MainLayout>
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Header Section */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900">Panel de Administración</h1>
-            <p className="mt-2 text-sm text-gray-600">Monitorea las métricas importantes de tu farmacia en tiempo real</p>
-          </div>
-
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-xl shadow-sm p-6 transition-all hover:shadow-md">
-              <div className="flex items-center">
-                <div className="p-3 rounded-full bg-blue-100">
-                  <TrendingUp className="h-6 w-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Ventas Totales</p>
-                  <p className="text-xl font-semibold text-gray-900">
-                    Q{topProducts.reduce((sum, product) => sum + product.totalAmount, 0).toFixed(2)}
-                  </p>
-                </div>
+      <div className="min-h-screen bg-[#f0f2f5]">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-8">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 sm:mb-8"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Panel de Administración</h1>
+                <p className="mt-2 text-sm text-gray-500">Gestiona las configuraciones y métricas de tu farmacia</p>
               </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 transition-all hover:shadow-md">
-              <div className="flex items-center">
-                <div className="p-3 rounded-full bg-green-100">
-                  <Package className="h-6 w-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Productos Vendidos</p>
-                  <p className="text-xl font-semibold text-gray-900">
-                    {topProducts.reduce((sum, product) => sum + product.totalUnits, 0)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 transition-all hover:shadow-md">
-              <div className="flex items-center">
-                <div className="p-3 rounded-full bg-purple-100">
-                  <DollarSign className="h-6 w-6 text-purple-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Promedio por Venta</p>
-                  <p className="text-xl font-semibold text-gray-900">
-                    Q{(topProducts.reduce((sum, product) => sum + product.totalAmount, 0) / (topProducts.length || 1)).toFixed(2)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 transition-all hover:shadow-md">
-              <div className="flex items-center">
-                <div className="p-3 rounded-full bg-yellow-100">
-                  <Users className="h-6 w-6 text-yellow-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Productos Diferentes</p>
-                  <p className="text-xl font-semibold text-gray-900">{topProducts.length}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Top Products Chart */}
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">Productos Más Vendidos</h2>
-              <select
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={selectedPeriod}
-                onChange={(e) => setSelectedPeriod(e.target.value as 'day' | 'week' | 'month')}
-              >
-                <option value="day">Hoy</option>
-                <option value="week">Esta Semana</option>
-                <option value="month">Este Mes</option>
-              </select>
-            </div>
-
-            <div className="h-96">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={topProducts.slice(0, 5)}
-                  margin={{ top: 20, right: 30, left: 20, bottom: 70 }}
+              {isAdmin && ubicaciones.length > 0 && (
+                <select
+                  className="px-3 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-400 transition-all bg-white min-w-[200px]"
+                  value={selectedUbicacion}
+                  onChange={(e) => setSelectedUbicacion(e.target.value)}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis
-                    dataKey="name"
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                    tick={{ fill: '#4B5563', fontSize: 12 }}
-                  />
-                  <YAxis
-                    tick={{ fill: '#4B5563' }}
-                    label={{ value: 'Total Vendido', angle: -90, position: 'insideLeft', fill: '#4B5563' }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                    }}
-                    formatter={(value: any, name: any, props: any) => {
-                      const product = props.payload;
-                      return [
-                        <div className="space-y-1">
-                          <p>Unidades: {product.salesByType?.unit || 0}</p>
-                          <p>Blisters: {product.salesByType?.blister || 0}</p>
-                          <p>Cajas: {product.salesByType?.box || 0}</p>
-                          <p className="font-semibold">Total: Q{product.totalAmount.toFixed(2) || 0}</p>
-                        </div>
-                      ];
-                    }}
-                  />
-                  <Bar
-                    dataKey="totalUnits"
-                    fill="rgba(59, 130, 246, 0.7)"
-                    stroke="rgb(220, 9, 9)"
-                    strokeWidth={1}
-                    radius={[4, 4, 0, 0]}
-                  >
-                    {topProducts.slice(0, 5).map((entry, index) => (
-                      <Cell
-                        key={index}
-                        fill={index === 0 ? '#10B981' : 'rgba(59, 130, 246, 0.7)'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Monthly Sales Chart - Moved here */}
-          {!loading && monthlyData && monthlyData.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-              <MonthlySalesChart data={monthlyData} />
-            </div>
-          )}
-
-          {/* Product Stats Section */}
-          {!loadingStats && productStats.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-              <ProductSalesStats products={productStats} />
-            </div>
-          )}
-
-          {/* Financial Metrics Section */}
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-gray-100">
-              <h2 className="text-xl font-semibold text-gray-900">Métricas Financieras</h2>
-              <p className="mt-1 text-sm text-gray-600">Análisis detallado del margen de contribución</p>
-            </div>
-            <div className="p-6">
-              {loadingStats ? (
-                <div className="flex justify-center items-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-                </div>
-              ) : financialMetrics ? (
-                <FinancialMetrics data={financialMetrics} />
-              ) : (
-                <p className="text-center text-gray-500">No hay datos financieros disponibles</p>
+                  <option value="">Todas las ubicaciones</option>
+                  {ubicaciones.map((ub) => (
+                    <option key={ub._id} value={ub._id}>{ub.nombre}</option>
+                  ))}
+                </select>
               )}
             </div>
+          </motion.div>
 
-            <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-              <EarningsStats
-                weeklyEarnings={earningsData.weeklyEarnings}
-                monthlyEarnings={earningsData.monthlyEarnings}
-                previousWeekEarnings={earningsData.previousWeekEarnings}
-                previousMonthEarnings={earningsData.previousMonthEarnings}
-                firstFifteenDaysEarnings={earningsData.firstFifteenDaysEarnings}
-                lastFifteenDaysEarnings={earningsData.lastFifteenDaysEarnings}
-              />
+          {/* Tabs */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mb-6 sm:mb-8"
+          >
+            <div className="flex gap-1 bg-gray-100/80 p-1 rounded-2xl backdrop-blur-sm">
+              {visibleTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 whitespace-nowrap min-w-0 ${
+                    activeTab === tab.id
+                      ? 'bg-white text-primary-600 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+                  }`}
+                >
+                  <tab.icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{tab.label}</span>
+                </button>
+              ))}
             </div>
-          </div>
+          </motion.div>
+
+          {/* Tab Content */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-8">
+              {/* KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
+                {loadingStats ? (
+                  Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+                ) : (
+                  kpiCards.map((card, i) => (
+                    <motion.div
+                      key={card.label}
+                      custom={i}
+                      initial="hidden"
+                      animate="visible"
+                      variants={cardVariants}
+                      className="bg-white rounded-2xl border border-gray-100/80 p-3 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300 group"
+                    >
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className={`p-2 sm:p-3 rounded-xl ${card.bgColor} group-hover:scale-110 transition-transform duration-300 shrink-0`}>
+                          <card.icon className={`h-5 w-5 sm:h-6 sm:w-6 ${card.iconColor}`} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm font-medium text-gray-500 truncate">{card.label}</p>
+                          <p className="text-lg sm:text-2xl font-bold text-gray-900 tabular-nums">
+                            <AnimatedCounter
+                              value={card.value}
+                              prefix={card.prefix || ''}
+                              decimals={card.format === 'currency' ? 2 : 0}
+                            />
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+
+              {/* Top Products + Daily Sales */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="xl:col-span-2 bg-white rounded-2xl border border-gray-100/80 shadow-sm overflow-hidden"
+                >
+                  <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-base sm:text-lg font-bold text-gray-900">Productos Más Vendidos</h2>
+                      <p className="text-xs sm:text-sm text-gray-500 mt-0.5">Top 5 por cantidad vendida</p>
+                    </div>
+                    <select
+                      className="px-3 py-1.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-400 transition-all bg-white"
+                      value={selectedPeriod}
+                      onChange={(e) => setSelectedPeriod(e.target.value as 'day' | 'week' | 'month')}
+                    >
+                      <option value="day">Hoy</option>
+                      <option value="week">Esta Semana</option>
+                      <option value="month">Este Mes</option>
+                    </select>
+                  </div>
+                  <div className="p-4 sm:p-6">
+                    {loading ? (
+                      <div className="h-80 flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-gray-300" />
+                      </div>
+                    ) : (
+                      <div className="h-80">
+                        {(() => {
+                          const props: any = {
+                            data: topProducts.slice(0, 5).map((p, i) => ({
+                              name: p.name.length > 12 ? p.name.slice(0, 12) + '...' : p.name,
+                              fullName: p.name,
+                              totalUnits: p.totalUnits || 0,
+                              totalAmount: p.totalAmount || 0,
+                              salesByType: {
+                                unit: p.salesDetails?.units || 0,
+                                blister: p.salesDetails?.blisters || 0,
+                                box: p.salesDetails?.boxes || 0,
+                              },
+                              index: i,
+                            })),
+                            keys: ['totalUnits'],
+                            indexBy: 'name',
+                            margin: { top: 20, right: 20, bottom: 60, left: 40 },
+                            padding: 0.3,
+                            colors: ["url(#adminGradient)"],
+                            borderRadius: 6,
+                            axisBottom: {
+                              tickSize: 0,
+                              tickPadding: 12,
+                              legend: '',
+                              legendPosition: 'middle',
+                              legendOffset: 32,
+                            },
+                            axisLeft: {
+                              tickSize: 0,
+                              tickPadding: 10,
+                            },
+                            enableGridY: true,
+                            gridYValues: 5,
+                            theme: {
+                              grid: { line: { stroke: '#f1f5f9', strokeWidth: 1 } },
+                              axis: {
+                                domain: { line: { stroke: 'transparent' } },
+                                ticks: { text: { fill: '#94a3b8' } },
+                              },
+                            },
+                            enableLabel: false,
+                            tooltip: ({ data }: any) => (
+                              <div className="bg-white px-4 py-3 rounded-xl shadow-lg border border-gray-100">
+                                <p className="text-sm font-semibold text-gray-900 mb-1">{data.fullName}</p>
+                                <div className="space-y-0.5 text-sm">
+                                  <p className="text-gray-500">Unidades: <span className="font-semibold text-gray-900">{data.salesByType?.unit || 0}</span></p>
+                                  <p className="text-gray-500">Blisters: <span className="font-semibold text-gray-900">{data.salesByType?.blister || 0}</span></p>
+                                  <p className="text-gray-500">Cajas: <span className="font-semibold text-gray-900">{data.salesByType?.box || 0}</span></p>
+                                  <p className="text-gray-500 pt-1 border-t border-gray-100">Total: <span className="font-bold text-gray-900">Q{(data.totalAmount || 0).toFixed(2)}</span></p>
+                                </div>
+                              </div>
+                            ),
+                            defs: [
+                              {
+                                id: 'adminGradient',
+                                type: 'linearGradient',
+                                colors: [
+                                  { offset: 0, color: '#6366f1' },
+                                  { offset: 100, color: '#818cf8' },
+                                ],
+                              },
+                            ],
+                          };
+                          return <ResponsiveBar {...props} />;
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <EarningsStats
+                    weeklyEarnings={earningsData.weeklyEarnings}
+                    monthlyEarnings={earningsData.monthlyEarnings}
+                    previousWeekEarnings={earningsData.previousWeekEarnings}
+                    previousMonthEarnings={earningsData.previousMonthEarnings}
+                    firstFifteenDaysEarnings={earningsData.firstFifteenDaysEarnings}
+                    lastFifteenDaysEarnings={earningsData.lastFifteenDaysEarnings}
+                  />
+                </motion.div>
+              </div>
+
+              {/* Monthly + Product Stats */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                {!loading && monthlyData && monthlyData.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                  >
+                    <MonthlySalesChart data={monthlyData} />
+                  </motion.div>
+                )}
+
+                {!loadingStats && productStats.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.6 }}
+                  >
+                    <ProductSalesStats products={productStats} />
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Financial Metrics */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.7 }}
+              >
+                {loadingStats ? (
+                  <ChartSkeleton />
+                ) : financialMetrics ? (
+                  <FinancialMetrics data={financialMetrics} />
+                ) : (
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-card p-12 text-center">
+                    <p className="text-gray-500">No hay datos financieros disponibles</p>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          )}
+
+          {activeTab === 'categories' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <CatalogManager
+                title="Categorías"
+                entityLabel="Categoría"
+                items={categories}
+                loading={loadingCategories}
+                onAdd={async (name) => { await addCategory(name); }}
+                onUpdate={updateCategory}
+                onDelete={deleteCategory}
+                onRefresh={loadCategories}
+              />
+            </motion.div>
+          )}
+
+          {activeTab === 'companies' && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <CatalogManager
+                title="Casas Farmacéuticas"
+                entityLabel="Casa Farmacéutica"
+                items={companies}
+                loading={loadingCompanies}
+                onAdd={async (name) => { await addPharmaceuticalCompany(name); }}
+                onUpdate={updatePharmaceuticalCompany}
+                onDelete={deletePharmaceuticalCompany}
+                onRefresh={loadCompanies}
+              />
+            </motion.div>
+          )}
         </div>
       </div>
     </MainLayout>

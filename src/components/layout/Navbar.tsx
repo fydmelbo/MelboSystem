@@ -1,10 +1,12 @@
-import { User, LogOut, Menu, Bell } from 'lucide-react';
+import { User, LogOut, Menu } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useAuth } from '../../features/auth/context/AuthContext';
 import React from 'react';
 import Logo from '../../img/LOGO (1).png';
-
+import NotificationPanel from './NotificationPanel';
+import { ubicacionesAPI } from '../../lib/api';
 
 interface NavbarProps {
   onMenuClick: () => void;
@@ -12,24 +14,24 @@ interface NavbarProps {
 
 export default function Navbar({ onMenuClick }: NavbarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [ubicaciones, setUbicaciones] = useState<Array<{ _id: string; nombre: string }>>([]);
   const navigate = useNavigate();
-  const userRole = localStorage.getItem('role') || 'usuario';
-  const { notifications, markAsRead, unreadCount } = useNotifications();
+  const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const { notifications, markAsRead, markAllAsRead, unreadCount } = useNotifications();
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('role');
-    navigate('/login');
-  };
+  useEffect(() => {
+    if (isAdmin) {
+      ubicacionesAPI.getUbicaciones().then(setUbicaciones).catch(() => {});
+    }
+  }, [isAdmin]);
 
-  const handleNotificationClick = async (notificationId: string) => {
-    await markAsRead(notificationId);
-    setIsNotificationsOpen(false);
+  const handleLogout = async () => {
+    await logout();
   };
 
   return (
-    <nav className="bg-[#F5F7FF] shadow-sm">
+    <nav className="bg-white shadow-sm border-b border-gray-100">
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex justify-between h-16">
           <div className="flex items-center gap-4">
@@ -43,55 +45,14 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
           </div>
           
           <div className="flex items-center gap-6">
-            {/* Notificaciones */}
-            <div className="relative">
-              <button
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <Bell className="h-6 w-6 text-gray-700" />
-                {unreadCount > 0 && (
-                  <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-500 rounded-full">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {isNotificationsOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl py-1 z-50 border border-gray-100">
-                  <div className="px-4 py-2 border-b">
-                    <h3 className="text-sm font-medium text-gray-900">Notificaciones</h3>
-                  </div>
-                  <div className="max-h-96 overflow-y-auto">
-                    {notifications.length > 0 ? (
-                      notifications.map((notification) => (
-                        <div
-                          key={notification._id}
-                          className={`px-4 py-3 hover:bg-gray-50 ${
-                            !notification.read ? 'bg-blue-50' : ''
-                          }`}
-                          onClick={() => handleNotificationClick(notification._id)}
-                        >
-                          <p className="text-sm font-medium text-gray-900">
-                            {notification.title}
-                          </p>
-                          <p className="text-sm text-gray-500 mt-1">
-                            {notification.message}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-1">
-                            {new Date(notification.createdAt).toLocaleString()}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="px-4 py-3 text-sm text-gray-500 text-center">
-                        No hay notificaciones
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            <NotificationPanel
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onMarkAsRead={markAsRead}
+              onMarkAllAsRead={markAllAsRead}
+              ubicaciones={ubicaciones}
+              isAdmin={isAdmin}
+            />
 
             {/* Usuario */}
             <div className="relative">
@@ -107,8 +68,8 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
               {isDropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl py-1 z-50 border border-gray-100">
                   <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-sm font-medium text-gray-900">Usuario Demo</p>
-                    <p className="text-sm text-blue-600 capitalize">{userRole}</p>
+                    <p className="text-sm font-medium text-gray-900">{user?.name || user?.email || 'Usuario'}</p>
+                    <p className="text-sm text-blue-600 capitalize">{user?.role || 'usuario'}</p>
                   </div>
                   <button
                     onClick={handleLogout}

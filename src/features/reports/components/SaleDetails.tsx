@@ -2,13 +2,15 @@ import { Sale } from '../types/Report';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import React from 'react';
 import { useState } from 'react';
+import { formatGuatemalaDate, formatGuatemalaTime } from '../../../lib/timezone';
 
 interface SaleDetailsProps {
   sale: Sale;
   index: number;
+  ubicacionName?: string;
 }
 
-export default function SaleDetails({ sale, index }: SaleDetailsProps) {
+export default function SaleDetails({ sale, index, ubicacionName }: SaleDetailsProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const formatSaleType = (type: string) => {
@@ -18,24 +20,6 @@ export default function SaleDetails({ sale, index }: SaleDetailsProps) {
       case 'box': return 'Caja';
       default: return type;
     }
-  };
-
-  const formatDate = (date: string) => {
-    const d = new Date(date);
-    return d.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: '2-digit'
-    });
-  };
-
-  const formatTime = (date: string) => {
-    const d = new Date(date);
-    return d.toLocaleTimeString('es-ES', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
   };
 
   return (
@@ -50,8 +34,13 @@ export default function SaleDetails({ sale, index }: SaleDetailsProps) {
           </span>
           <span className="text-gray-300">|</span>
           <span className="text-sm text-gray-600">
-            {formatDate(sale.createdAt)} - {formatTime(sale.createdAt)}
+            {formatGuatemalaDate(sale.createdAt)} - {formatGuatemalaTime(sale.createdAt)}
           </span>
+          {ubicacionName && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-primary-100 text-primary-700 rounded-full">
+              {ubicacionName}
+            </span>
+          )}
           <span className="font-medium">
             Q{sale.total.toFixed(2)}
           </span>

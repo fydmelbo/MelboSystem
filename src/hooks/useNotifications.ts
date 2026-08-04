@@ -1,10 +1,10 @@
-// src/hooks/useNotifications.ts
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getProducts } from '../features/products/services/productService';
 import { 
   Notification, 
   getNotifications, 
   markNotificationAsRead,
+  markAllNotificationsAsRead,
   createNotification 
 } from '../features/notifications/services/notificationService';
 import { useAuth } from '../features/auth/context/AuthContext';
@@ -33,7 +33,6 @@ export function useNotifications() {
   useEffect(() => {
     const checkProductsStatus = async () => {
       try {
-        // Obtener notificaciones existentes primero para no duplicar
         const existingNotifs = await getNotifications();
         setNotifications(existingNotifs);
 
@@ -42,14 +41,13 @@ export function useNotifications() {
         const notificationPromises: Promise<Notification>[] = [];
         
         products.forEach(product => {
-          // Helper para saber si ya hay una notificación no leída de este tipo para este producto
-          const hasUnreadNotif = (type: string) => {
-            return existingNotifs.some(n => n.productId === product._id && n.type === type && !n.read);
+          // Check for ANY existing notification (read or not) to prevent duplicates
+          const hasAnyNotif = (type: string) => {
+            return existingNotifs.some(n => n.productId === product._id && n.type === type);
           };
 
-          // Verificar stock bajo
           if (product.sellOptions.unit && product.stock.units <= LOW_STOCK_THRESHOLD) {
-            if (!hasUnreadNotif('stock-low')) {
+            if (!hasAnyNotif('stock-low')) {
               notificationPromises.push(
                 createNotification({
                   productId: product._id,
@@ -61,14 +59,13 @@ export function useNotifications() {
             }
           }
 
-          // Verificar fecha de vencimiento si tiene una fecha válida
           if (product.expirationDate) {
             const expirationDate = new Date(product.expirationDate);
             if (!isNaN(expirationDate.getTime())) {
               const monthsUntilExpiration = (expirationDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24 * 30);
 
               if (monthsUntilExpiration <= 0) {
-                if (!hasUnreadNotif('expired')) {
+                if (!hasAnyNotif('expired')) {
                   notificationPromises.push(
                     createNotification({
                       productId: product._id,
@@ -79,7 +76,7 @@ export function useNotifications() {
                   );
                 }
               } else if (monthsUntilExpiration <= EXPIRATION_WARNING_MONTHS) {
-                if (!hasUnreadNotif('expiring-soon')) {
+                if (!hasAnyNotif('expiring-soon')) {
                   notificationPromises.push(
                     createNotification({
                       productId: product._id,
@@ -94,7 +91,6 @@ export function useNotifications() {
           }
         });
 
-        // Esperar a que todas las notificaciones nuevas se creen
         if (notificationPromises.length > 0) {
           await Promise.all(notificationPromises);
           await fetchNotifications();
@@ -107,24 +103,37 @@ export function useNotifications() {
     };
 
     checkProductsStatus();
-    // Ejecutar cada hora en lugar de cada minuto para no sobrecargar
     const interval = setInterval(checkProductsStatus, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleMarkAsRead = async (notificationId: string) => {
+  const handleMarkAsRead = useCallback(async (notificationId: string) => {
+    setNotifications(prev => prev.filter(n => n._id !== notificationId));
     try {
       await markNotificationAsRead(notificationId);
-      await fetchNotifications();
     } catch (error) {
       console.error('Error al marcar notificación como leída:', error);
+      await fetchNotifications();
     }
-  };
+  }, []);
+
+  const handleMarkAllAsRead = useCallback(async () => {
+    setNotifications(prev => prev.filter(n => n.read));
+    try {
+      await markAllNotificationsAsRead();
+    } catch (error) {
+      console.error('Error al marcar todas como leídas:', error);
+      await fetchNotifications();
+    }
+  }, []);
+
+  const unreadNotifications = notifications.filter(n => !n.read);
 
   return {
-    notifications,
+    notifications: unreadNotifications,
     markAsRead: handleMarkAsRead,
-    unreadCount: notifications.filter(n => !n.read).length,
+    markAllAsRead: handleMarkAllAsRead,
+    unreadCount: unreadNotifications.length,
     error
   };
 }

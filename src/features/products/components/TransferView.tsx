@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ubicacionesAPI } from '../../../lib/api';
+import { ubicacionesAPI, productsAPI } from '../../../lib/api';
 import { transferProducts } from '../services/transferService';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Truck, MapPin, Phone, Building2 } from 'lucide-react';
 import MainLayout from '../../../components/layout/MainLayout'; 
-import Pagination from './Pagination';
+import Pagination from '../../../components/ui/Pagination';
 import { useAuth } from '../../auth/context/AuthContext';
 
 interface Location {
@@ -67,7 +67,6 @@ export const TransferView: React.FC = () => {
   const loadLocations = async () => {
     try {
       const data = await ubicacionesAPI.getUbicaciones();
-      console.log(data);
       setLocations(data);
     } catch (error) {
       toast.error('Error al cargar ubicaciones');
@@ -93,8 +92,8 @@ export const TransferView: React.FC = () => {
     }
     setSourceLocation(locationId);
     try {
-      const location = await ubicacionesAPI.getUbicacionById(locationId);
-      setSourceProducts((location as any).productosAsociados || []);
+      const products = await productsAPI.getProducts(locationId);
+      setSourceProducts(products);
     } catch (error) {
       toast.error('Error al cargar productos de la ubicación');
     }
@@ -119,15 +118,10 @@ export const TransferView: React.FC = () => {
       
       setSelectedProducts(prevProducts => {
         const updatedProducts = [...prevProducts, newProduct];
-        console.log('Productos seleccionados actualizados:', updatedProducts);
         return updatedProducts;
       });
     }
   };
-
-  useEffect(() => {
-    console.log('Estado actual de selectedProducts:', selectedProducts);
-  }, [selectedProducts]);
 
   const handleQuantityChange = (productId: string, value: number) => {
     setSelectedProducts(selectedProducts.map(p => 

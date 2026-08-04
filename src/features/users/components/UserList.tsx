@@ -1,13 +1,13 @@
 import React from 'react';
 import { useAuth } from '../../auth/context/AuthContext';
 import { User } from '../services/userService';
-import Pagination from './Pagination';
+import Pagination from '../../../components/ui/Pagination';
 import { useUsers } from '../hooks/useUsers';
 import { Pencil, Trash2 } from 'lucide-react';
 
 interface UserListProps {
   onEdit: (user: User) => void;
-  onDelete: (userId: string) => void;
+  onDelete: (user: User) => void;
   emailFilter: string;
   roleFilter: string;
   sortOption: string;
@@ -96,7 +96,7 @@ export default function UserList({
                     Editar
                   </button>
                   <button
-                    onClick={() => onDelete(user.id)}
+                    onClick={() => onDelete(user)}
                     disabled={currentUser?.role === 'admin_ubicacion' && user.role === 'admin'}
                     className="flex items-center gap-1 px-3 py-1 rounded-full bg-red-100 text-red-700 font-semibold hover:bg-red-200 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >

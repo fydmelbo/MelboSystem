@@ -7,9 +7,13 @@ interface ProductsTableProps {
   products: Product[];
   onEdit: (product: Product) => void;
   onDelete: (productId: string) => void;
+  ubicaciones?: Array<{ _id: string; nombre: string }>;
+  isAdmin?: boolean;
 }
 
-export default function ProductsTable({ products, onEdit, onDelete }: ProductsTableProps) {
+export default function ProductsTable({ products, onEdit, onDelete, ubicaciones = [], isAdmin = false }: ProductsTableProps) {
+  const ubicacionMap = new Map(ubicaciones.map(ub => [ub._id, ub.nombre]));
+
   const formatPrice = (price?: number) => {
     return price ? `Q${price.toFixed(2)}` : '-';
   };
@@ -136,6 +140,11 @@ export default function ProductsTable({ products, onEdit, onDelete }: ProductsTa
                   <th scope="col" className="hidden lg:table-cell px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                     Casa Farm.
                   </th>
+                  {isAdmin && (
+                    <th scope="col" className="hidden lg:table-cell px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
+                      Ubicación
+                    </th>
+                  )}
                   <th scope="col" className="hidden md:table-cell px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
                     Stock
                   </th>
@@ -168,6 +177,11 @@ export default function ProductsTable({ products, onEdit, onDelete }: ProductsTa
                     <td className="hidden lg:table-cell whitespace-nowrap px-3 py-4 text-sm text-gray-900">
                       {product.pharmaceuticalCompany || '-'}
                     </td>
+                    {isAdmin && (
+                      <td className="hidden lg:table-cell whitespace-nowrap px-3 py-4 text-sm text-gray-900">
+                        {ubicacionMap.get(product.location?._id) || '-'}
+                      </td>
+                    )}
                     <td className="hidden md:table-cell whitespace-nowrap px-3 py-4 text-sm text-gray-900">
                       {formatStock(product)}
                     </td>

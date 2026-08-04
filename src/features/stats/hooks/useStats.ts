@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { TopSellingProduct, MonthlySalesData, getTopSellingProducts, getMonthlySalesStats } from '../services/statsService';
-import { toast } from 'react-hot-toast';
 
-export function useStats() {
+export function useStats(ubicacion?: string | null) {
   const [topProducts, setTopProducts] = useState<TopSellingProduct[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlySalesData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -12,8 +11,8 @@ export function useStats() {
     try {
       setLoading(true);
       const [productsData, monthlyStats] = await Promise.all([
-        getTopSellingProducts(selectedPeriod),
-        getMonthlySalesStats()
+        getTopSellingProducts(selectedPeriod, ubicacion),
+        getMonthlySalesStats(ubicacion)
       ]);
       setTopProducts(productsData);
       setMonthlyData(monthlyStats);
@@ -26,7 +25,7 @@ export function useStats() {
 
   useEffect(() => {
     fetchStats();
-  }, [selectedPeriod]);
+  }, [selectedPeriod, ubicacion]);
 
   return {
     topProducts,

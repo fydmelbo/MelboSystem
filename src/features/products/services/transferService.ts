@@ -82,5 +82,21 @@ export const transferProducts = async (transferData: TransferRequest) => {
     }
   }
 
+  // Auditoría: Obtener nombres de las ubicaciones
+  const origenUbiSnap = await getDoc(doc(db, 'ubicaciones', ubicacionOrigenId));
+  const destinoUbiSnap = await getDoc(doc(db, 'ubicaciones', ubicacionDestinoId));
+  const origenName = origenUbiSnap.exists() ? origenUbiSnap.data().nombre : 'Desconocida';
+  const destinoName = destinoUbiSnap.exists() ? destinoUbiSnap.data().nombre : 'Desconocida';
+
+  const { logAuditAction } = await import('../../audit/services/auditService');
+  const totalItemsLogged = productos.reduce((acc, item) => acc + item.quantity, 0);
+  
+  await logAuditAction(
+    'CREAR',
+    'Transferencia',
+    `${ubicacionOrigenId}-${ubicacionDestinoId}-${Date.now()}`,
+    `Se transfirieron ${totalItemsLogged} producto(s) de ${origenName} hacia ${destinoName}`
+  );
+
   return { message: 'Transferencia realizada exitosamente' };
 };
