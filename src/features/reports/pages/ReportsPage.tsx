@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../../../components/layout/MainLayout';
 import ReportSummary from '../components/ReportSummary';
-import { Report } from '../types/Report';
+import { Report, Sale } from '../types/Report';
 import { getCurrentReport, getReportByDate, generatePDF, generateExcel, getReportsByRange } from '../services/reportService';
+import { revertSaleService } from '../../sales/services/salesService';
 import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import React from 'react';
 import { useAuth } from '../../auth/context/AuthContext';
 import { ubicacionesAPI } from '../../../lib/api';
-import { getGuatemalaDate, isGuatemalaToday } from '../../../lib/timezone';
+import { getGuatemalaDate, isGuatemalaToday, formatGuatemalaDateTime } from '../../../lib/timezone';
 
 export default function ReportsPage() {
 
@@ -22,6 +23,10 @@ export default function ReportsPage() {
   const [isRangeMode, setIsRangeMode] = useState(false);
   const [ubicaciones, setUbicaciones] = useState<{ _id: string; nombre: string }[]>([]);
   const [selectedUbicacion, setSelectedUbicacion] = useState<string>('');
+  const [saleToRevert, setSaleToRevert] = useState<Sale | null>(null);
+  const [revertReason, setRevertReason] = useState('');
+  const [revertUbicacion, setRevertUbicacion] = useState('');
+  const [isReverting, setIsReverting] = useState(false);
   const { user } = useAuth();
 
   const ubicacion = localStorage.getItem('ubicacion');
@@ -70,7 +75,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     loadReport(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, selectedUbicacion]);
 
   const handleGeneratePDF = async () => {
     if (!currentReport) return;
@@ -142,6 +147,68 @@ export default function ReportsPage() {
     }
   };
 
+  const handleRevertSale = (sale: Sale) => {
+    setSaleToRevert(sale);
+    setRevertReason('');
+    setRevertUbicacion(selectedUbicacion || localStorage.getItem('ubicacion') || '');
+  };
+
+  const confirmRevertSale = async () => {
+    if (!saleToRevert || !saleToRevert._id || !currentReport) return;
+    if (!revertReason.trim()) {
+      toast.error('Debe ingresar un motivo de anulación');
+      return;
+    }
+
+    setIsReverting(true);
+    try {
+      // Determinar la ubicación
+      const saleUbicacion = revertUbicacion || localStorage.getItem('ubicacion') || selectedUbicacion;
+      if (!saleUbicacion) {
+        toast.error('Debe seleccionar una ubicación para revertir la venta');
+        return;
+      }
+
+      // Buscar el reporte real para la ubicación seleccionada
+      let reportId = currentReport._id;
+      if (reportId.startsWith('combined')) {
+        // Vista "Todas" — buscar el reporte activo de la ubicación específica
+        try {
+          const ubicacionReport = isGuatemalaToday(selectedDate)
+            ? await getCurrentReport(saleUbicacion)
+            : await getReportByDate(selectedDate, saleUbicacion);
+          reportId = ubicacionReport._id;
+        } catch {
+          toast.error('No se encontró un reporte activo para la ubicación seleccionada');
+          return;
+        }
+      }
+
+      await revertSaleService(
+        saleToRevert._id,
+        {
+          items: saleToRevert.items,
+          total: saleToRevert.total,
+        },
+        saleUbicacion,
+        reportId,
+        revertReason.trim()
+      );
+
+      toast.success('Venta anulada exitosamente. Stock devuelto.');
+      setSaleToRevert(null);
+      setRevertReason('');
+      setRevertUbicacion('');
+      loadReport(selectedDate);
+    } catch (error) {
+      console.error('Error al revertir venta:', error);
+    } finally {
+      setIsReverting(false);
+    }
+  };
+
+  const canRevertSale = (user?.role === 'admin' || user?.role === 'admin_ubicacion') && !isRangeMode;
+
   return (
     <MainLayout>
       <div className="space-y-6 p-3 sm:p-6">
@@ -159,7 +226,6 @@ export default function ReportsPage() {
                 value={selectedUbicacion}
                 onChange={(e) => {
                   setSelectedUbicacion(e.target.value);
-                  loadReport(selectedDate);
                 }}
                 className="px-3 py-2 border rounded-md w-full sm:w-auto"
               >
@@ -224,6 +290,8 @@ export default function ReportsPage() {
                   report={currentReport}
                   ubicaciones={ubicaciones}
                   isAdmin={user?.role === 'admin'}
+                  onRevertSale={canRevertSale ? handleRevertSale : undefined}
+                  canRevert={canRevertSale}
                 />
               ) : (
                 <div className="text-center py-8 text-gray-500">
@@ -298,6 +366,99 @@ export default function ReportsPage() {
           )}
         </div>
       </div>
+
+      {/* Modal de confirmación de anulación */}
+      {saleToRevert && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+            <h2 className="text-xl font-bold text-red-600 mb-2">Anular Venta</h2>
+            <p className="text-gray-600 mb-4">
+              ¿Estás seguro de que deseas anular esta venta? Se devolverá el stock de todos los productos.
+            </p>
+
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <span className="text-gray-500">Fecha:</span>
+                <span className="font-medium">{formatGuatemalaDateTime(saleToRevert.createdAt)}</span>
+                <span className="text-gray-500">Total:</span>
+                <span className="font-medium">Q{saleToRevert.total.toFixed(2)}</span>
+                <span className="text-gray-500">Productos:</span>
+                <span className="font-medium">{saleToRevert.items.length}</span>
+              </div>
+              <div className="mt-3 border-t pt-3">
+                <p className="text-xs text-gray-500 mb-1">Ítems:</p>
+                {saleToRevert.items.map((item, idx) => (
+                  <p key={idx} className="text-sm text-gray-700">
+                    {item.name} — {item.quantity} {item.saleType === 'unit' ? 'ud' : item.saleType === 'blister' ? 'bl' : 'cj'}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            {user?.role === 'admin' && !selectedUbicacion && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Ubicación <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={revertUbicacion}
+                  onChange={(e) => setRevertUbicacion(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400"
+                >
+                  <option value="">Seleccione una ubicación</option>
+                  {ubicaciones.map((ub) => (
+                    <option key={ub._id} value={ub._id}>{ub.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Motivo de anulación <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={revertReason}
+                onChange={(e) => setRevertReason(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400"
+                rows={3}
+                placeholder="Ingrese el motivo de la anulación..."
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setSaleToRevert(null);
+                  setRevertReason('');
+                  setRevertUbicacion('');
+                }}
+                disabled={isReverting}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmRevertSale}
+                disabled={isReverting || !revertReason.trim() || (user?.role === 'admin' && !selectedUbicacion && !revertUbicacion)}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isReverting ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Anulando...
+                  </>
+                ) : (
+                  'Confirmar Anulación'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }

@@ -335,42 +335,80 @@ export const reportsAPI = {
     }
   },
 
-  addSaleToReport: async (sale: any) => {
+  addSaleToReport: async (sale: any, saleDate?: string) => {
     const ubicacion = sale.ubicacion || localStorage.getItem('ubicacion');
     if (!ubicacion) throw new Error('Se requiere ubicación para registrar la venta');
 
-    // Buscar el reporte activo
     const reportsRef = collection(db, 'ubicaciones', ubicacion, 'reports');
-    const q = query(reportsRef, where('status', '==', 'active'));
-    const snapshot = await getDocs(q);
+    const isBackdated = !!saleDate && saleDate !== getGuatemalaDate();
 
     let reportRef;
-    if (snapshot.empty) {
-      const todayStr = getGuatemalaDate();
-      const startOfDay = getGuatemalaStartOfDay(todayStr);
-      const endOfDay = getGuatemalaEndOfDay(todayStr);
-      const newReportRef = await addDoc(reportsRef, {
-        startDate: Timestamp.fromDate(startOfDay),
-        endDate: Timestamp.fromDate(endOfDay),
-        sales: [],
-        totalSales: 0,
-        totalProducts: 0,
-        status: 'active',
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-      reportRef = newReportRef;
+    let wasClosed = false;
+
+    if (isBackdated) {
+      // Venta atrasada: buscar o crear reporte para la fecha objetivo
+      const startOfDay = getGuatemalaStartOfDay(saleDate);
+      const endOfDay = getGuatemalaEndOfDay(saleDate);
+      const q = query(
+        reportsRef,
+        where('startDate', '>=', Timestamp.fromDate(startOfDay)),
+        where('startDate', '<=', Timestamp.fromDate(endOfDay))
+      );
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        // Crear nuevo reporte para esa fecha (ya cerrado)
+        const newReportRef = await addDoc(reportsRef, {
+          startDate: Timestamp.fromDate(startOfDay),
+          endDate: Timestamp.fromDate(endOfDay),
+          sales: [],
+          totalSales: 0,
+          totalProducts: 0,
+          status: 'completed',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+        reportRef = newReportRef;
+      } else {
+        reportRef = snapshot.docs[0].ref;
+        const reportData = snapshot.docs[0].data();
+        if (reportData.status === 'completed') {
+          wasClosed = true;
+          await updateDoc(reportRef, { status: 'active', updatedAt: Timestamp.now() });
+        }
+      }
     } else {
-      reportRef = snapshot.docs[0].ref;
+      // Venta normal: buscar reporte activo de hoy
+      const q = query(reportsRef, where('status', '==', 'active'));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        const todayStr = getGuatemalaDate();
+        const startOfDay = getGuatemalaStartOfDay(todayStr);
+        const endOfDay = getGuatemalaEndOfDay(todayStr);
+        const newReportRef = await addDoc(reportsRef, {
+          startDate: Timestamp.fromDate(startOfDay),
+          endDate: Timestamp.fromDate(endOfDay),
+          sales: [],
+          totalSales: 0,
+          totalProducts: 0,
+          status: 'active',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+        reportRef = newReportRef;
+      } else {
+        reportRef = snapshot.docs[0].ref;
+      }
     }
 
     // Agregar la venta como subcolección
     const salesRef = collection(reportRef, 'sales');
     const saleData = {
       ...sale,
-      createdAt: Timestamp.now(),
+      createdAt: sale.saleCreatedAt || Timestamp.now(),
     };
-    delete saleData.ubicacion; // No necesitamos la ubicación dentro de la venta
+    delete saleData.saleCreatedAt;
     await addDoc(salesRef, saleData);
 
     // Actualizar totales del reporte
@@ -383,6 +421,11 @@ export const reportsAPI = {
         totalProducts: (reportData.totalProducts || 0) + totalItems,
         updatedAt: Timestamp.now(),
       });
+    }
+
+    // Cerrar reporte si estaba cerrado antes (venta atrasada)
+    if (wasClosed) {
+      await updateDoc(reportRef, { status: 'completed', updatedAt: Timestamp.now() });
     }
 
     return { message: 'Venta registrada exitosamente' };
@@ -501,10 +544,13 @@ export const reportsAPI = {
     
     const snapshot = await getDocs(q);
 
-    return snapshot.docs.map(doc => ({
-      _id: doc.id,
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const results = [];
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data();
+      const salesSnap = await getDocs(collection(docSnap.ref, 'sales'));
+      const sales = salesSnap.docs.map(s => ({ _id: s.id, id: s.id, ...s.data() }));
+      results.push({ _id: docSnap.id, id: docSnap.id, ...data, sales });
+    }
+    return results;
   }
 };

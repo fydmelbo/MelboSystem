@@ -5,8 +5,8 @@ export const getCurrentReport = async (ubicacion?: string): Promise<Report> => {
   return reportsAPI.getCurrentReport(ubicacion) as unknown as Report;
 };
 
-export const addSaleToReport = async (sale: Sale): Promise<any> => {
-  return reportsAPI.addSaleToReport(sale);
+export const addSaleToReport = async (sale: Sale, saleDate?: string): Promise<any> => {
+  return reportsAPI.addSaleToReport(sale, saleDate);
 };
 
 import jsPDF from 'jspdf';

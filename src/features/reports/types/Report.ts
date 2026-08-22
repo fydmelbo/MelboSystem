@@ -9,6 +9,7 @@ export interface SaleItem {
 }
 
 export interface Sale {
+  _id?: string;
   items: SaleItem[];
   total: number;
   createdAt: string;
@@ -16,6 +17,10 @@ export interface Sale {
   paymentType?: string;
   cashGiven?: number;
   change?: number;
+  revertedAt?: string;
+  revertReason?: string;
+  revertedBy?: string;
+  isBackdated?: boolean;
 }
 
 export interface Report {

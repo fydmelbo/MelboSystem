@@ -19,6 +19,23 @@ import {
 interface CreateProductModalProps {
   onClose: () => void;
   onSubmit: (productData: any) => void;
+  initialData?: Partial<{
+    name: string;
+    barcode: string;
+    category: string;
+    pharmaceuticalCompany: string;
+    packaging: { unitsPerBlister: number; blistersPerBox: number; unitsPerBox: number; description: string };
+    sellOptions: { unit: boolean; blister: boolean; box: boolean };
+    prices: { unit?: number; blister?: number; box?: number };
+    purchasePrices: { unit?: number; blister?: number; box?: number };
+    stock: { units: number; blisters: number; boxes: number; initial: number };
+    entryDate: string;
+    expirationDate: string;
+    invoice: string;
+    paymentType: string;
+    location: string;
+    profitMargin: number;
+  }>;
 }
 
 interface Ubicacion {
@@ -33,7 +50,7 @@ const STEP_LABELS = [
   'Configuración Final'
 ];
 
-export default function CreateProductModal({ onClose, onSubmit }: CreateProductModalProps) {
+export default function CreateProductModal({ onClose, onSubmit, initialData }: CreateProductModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -69,6 +86,51 @@ export default function CreateProductModal({ onClose, onSubmit }: CreateProductM
       setFormData(prev => ({ ...prev, location: uId }));
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (initialData) {
+      setFormData(prev => ({
+        ...prev,
+        name: initialData.name ?? prev.name,
+        barcode: initialData.barcode ?? prev.barcode,
+        category: initialData.category ?? prev.category,
+        pharmaceuticalCompany: initialData.pharmaceuticalCompany ?? prev.pharmaceuticalCompany,
+        packaging: {
+          ...prev.packaging,
+          ...(initialData.packaging || {}),
+          unitsPerBlister: initialData.packaging?.unitsPerBlister !== undefined ? String(initialData.packaging.unitsPerBlister) : prev.packaging.unitsPerBlister,
+          blistersPerBox: initialData.packaging?.blistersPerBox !== undefined ? String(initialData.packaging.blistersPerBox) : prev.packaging.blistersPerBox,
+          unitsPerBox: initialData.packaging?.unitsPerBox !== undefined ? String(initialData.packaging.unitsPerBox) : prev.packaging.unitsPerBox,
+          description: initialData.packaging?.description ?? prev.packaging.description,
+        },
+        sellOptions: initialData.sellOptions ?? prev.sellOptions,
+        prices: {
+          ...prev.prices,
+          unit: initialData.prices?.unit !== undefined ? String(initialData.prices.unit) : prev.prices.unit,
+          blister: initialData.prices?.blister !== undefined ? String(initialData.prices.blister) : prev.prices.blister,
+          box: initialData.prices?.box !== undefined ? String(initialData.prices.box) : prev.prices.box,
+        },
+        purchasePrices: {
+          ...prev.purchasePrices,
+          unit: initialData.purchasePrices?.unit !== undefined ? String(initialData.purchasePrices.unit) : prev.purchasePrices.unit,
+          blister: initialData.purchasePrices?.blister !== undefined ? String(initialData.purchasePrices.blister) : prev.purchasePrices.blister,
+          box: initialData.purchasePrices?.box !== undefined ? String(initialData.purchasePrices.box) : prev.purchasePrices.box,
+        },
+        stock: {
+          units: initialData.stock?.units !== undefined ? String(initialData.stock.units) : prev.stock.units,
+          blisters: initialData.stock?.blisters !== undefined ? String(initialData.stock.blisters) : prev.stock.blisters,
+          boxes: initialData.stock?.boxes !== undefined ? String(initialData.stock.boxes) : prev.stock.boxes,
+          initial: initialData.stock?.initial !== undefined ? String(initialData.stock.initial) : prev.stock.initial,
+        },
+        entryDate: initialData.entryDate ?? prev.entryDate,
+        expirationDate: initialData.expirationDate ?? prev.expirationDate,
+        invoice: initialData.invoice ?? prev.invoice,
+        paymentType: initialData.paymentType ?? prev.paymentType,
+        location: initialData.location ?? prev.location,
+        profitMargin: initialData.profitMargin !== undefined ? String(initialData.profitMargin) : prev.profitMargin,
+      }));
+    }
+  }, [initialData]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -537,7 +599,7 @@ export default function CreateProductModal({ onClose, onSubmit }: CreateProductM
     <BaseModal
       isOpen={true}
       onClose={onClose}
-      title="Crear Nuevo Producto"
+      title={initialData ? "Inventario desde Compra" : "Crear Nuevo Producto"}
       size="lg"
       currentStep={currentStep}
       totalSteps={STEP_LABELS.length}

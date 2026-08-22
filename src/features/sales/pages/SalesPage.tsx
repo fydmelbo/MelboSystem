@@ -14,6 +14,7 @@ import { PaymentDivider, Payment } from '../components/PaymentDivider';
 import { useAuth } from '../../auth/context/AuthContext';
 import { ubicacionesAPI } from '../../../lib/api';
 import { unitsToDeductForSale, StockPackaging, StockSellOptions } from '../../products/utils/stockMath';
+import { getGuatemalaDate } from '../../../lib/timezone';
 
 export default function SalesPage() {
   const { user } = useAuth();
@@ -28,6 +29,8 @@ export default function SalesPage() {
   const [cashGiven, setCashGiven] = useState<string>('');
   const [selectedUbicacion, setSelectedUbicacion] = useState<string>(user?.ubicacion || '');
   const [ubicaciones, setUbicaciones] = useState<Array<{ _id: string; nombre: string }>>([]);
+  const [backdateEnabled, setBackdateEnabled] = useState(false);
+  const [backdateDate, setBackdateDate] = useState(getGuatemalaDate());
   const cashInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -213,6 +216,11 @@ export default function SalesPage() {
       return;
     }
 
+    if (backdateEnabled && backdateDate > getGuatemalaDate()) {
+      toast.error('La fecha de venta atrasada no puede ser futura');
+      return;
+    }
+
     try {
       for (const item of saleItems) {
         const totalUnits = item.quantity * item.unitsPerSale;
@@ -236,16 +244,19 @@ export default function SalesPage() {
       };
 
       const firstItem = saleItems[0] as SaleItem & { ubicacion?: string };
+      const isBackdated = backdateEnabled && backdateDate !== getGuatemalaDate();
 
       const saleData = {
         items: saleItems,
         total,
         paymentType: paymentData,
         ubicacion: isAdmin ? selectedUbicacion : (firstItem.ubicacion || localStorage.getItem('ubicacion')),
-        createdAt: new Date().toISOString()
+        createdAt: isBackdated ? `${backdateDate}T12:00:00` : new Date().toISOString(),
+        isBackdated,
       };
 
-      await addSaleToReport(saleData as any);
+      const saleDateParam = isBackdated ? backdateDate : undefined;
+      await addSaleToReport(saleData as any, saleDateParam);
 
       const { logAuditAction } = await import('../../../features/audit/services/auditService');
       const totalItemsLogged = saleItems.reduce((acc, item) => acc + item.quantity, 0);
@@ -257,12 +268,14 @@ export default function SalesPage() {
         `Se registró una venta de ${totalItemsLogged} producto(s) (${productNames}) por un total de Q${total.toFixed(2)}`
       );
 
-      toast.success('Venta finalizada con éxito');
+      toast.success(isBackdated ? 'Venta atrasada registrada con éxito' : 'Venta finalizada con éxito');
       setSaleItems([]);
       setPayments([]);
       setPaymentType('efectivo');
       setIsDivided(false);
       setCashGiven('');
+      setBackdateEnabled(false);
+      setBackdateDate(getGuatemalaDate());
     } catch (error) {
       console.error('Error en la venta:', error);
       toast.error('Error al procesar la venta');
@@ -301,6 +314,29 @@ export default function SalesPage() {
                 <option key={ub._id} value={ub._id}>{ub.nombre}</option>
               ))}
             </select>
+          </div>
+        )}
+
+        {(isAdmin || user?.role === 'admin_ubicacion') && (
+          <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={backdateEnabled}
+                onChange={(e) => setBackdateEnabled(e.target.checked)}
+                className="form-checkbox h-5 w-5 text-orange-600"
+              />
+              <span className="text-sm font-medium text-gray-700">Venta Atrasada</span>
+            </label>
+            {backdateEnabled && (
+              <input
+                type="date"
+                value={backdateDate}
+                max={getGuatemalaDate()}
+                onChange={(e) => setBackdateDate(e.target.value)}
+                className="px-3 py-2 border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-400 bg-orange-50"
+              />
+            )}
           </div>
         )}
         

@@ -16,7 +16,7 @@ import { db } from '../../../config/firebase';
 import { Product } from '../../../features/products/types/Product';
 import { SaleItem } from '../types/Sale';
 import toast from 'react-hot-toast';
-import { deductUnitsFromStock } from '../../products/utils/stockMath';
+import { deductUnitsFromStock, increaseUnitsToStock, normalizeFromUnits } from '../../products/utils/stockMath';
 import { Promotion } from '../../promotions/types/Promotion';
 
 export const findProductByBarcodeService = async (
@@ -253,6 +253,188 @@ export const getProductPromotions = async (productId: string): Promise<Promotion
       });
   } catch (error: any) {
     const message = error?.message || 'Error al obtener promociones del producto';
+    toast.error(message);
+    throw error;
+  }
+};
+
+/**
+ * Revierte una venta completa: devuelve el stock de cada ítem,
+ * marca la venta como anulada y actualiza los contadores del reporte.
+ *
+ * @param saleId - ID del documento de venta en Firestore
+ * @param saleData - Datos de la venta (items, total, ubicacion, etc.)
+ * @param ubicacionId - ID de la ubicación donde está el reporte
+ * @param reportId - ID del reporte que contiene la venta
+ * @param reason - Motivo de la anulación
+ */
+export const revertSaleService = async (
+  saleId: string,
+  saleData: {
+    items: Array<{
+      productId: string;
+      quantity: number;
+      unitsPerSale: number;
+      name: string;
+      saleType: 'unit' | 'blister' | 'box';
+    }>;
+    total: number;
+  },
+  ubicacionId: string,
+  reportId: string,
+  reason: string
+): Promise<void> => {
+  try {
+    // 0. Verificar que la venta existe en la ubicación indicada
+    const saleRef = doc(db, 'ubicaciones', ubicacionId, 'reports', reportId, 'sales', saleId);
+    const saleSnap = await getDoc(saleRef);
+    if (!saleSnap.exists()) {
+      throw new Error('La venta no existe en la ubicación seleccionada. Verifique que seleccionó la ubicación correcta.');
+    }
+
+    // 1. Devolver stock de cada ítem
+    for (const item of saleData.items) {
+      const unitsToReturn = item.quantity * item.unitsPerSale;
+
+      const productRef = doc(db, 'ubicaciones', ubicacionId, 'products', item.productId);
+      await runTransaction(db, async (transaction) => {
+        const productSnap = await transaction.get(productRef);
+        if (!productSnap.exists()) {
+          console.warn(`Producto ${item.productId} no encontrado, saltando devolución de stock`);
+          return;
+        }
+
+        const data = productSnap.data();
+        const stock = data.stock || {};
+        const packaging = data.packaging || {};
+        const sellOptions = data.sellOptions || {};
+
+        const result = increaseUnitsToStock(
+          {
+            boxes: Number(stock.boxes || 0),
+            blisters: Number(stock.blisters || 0),
+            units: Number(stock.units || 0),
+          },
+          unitsToReturn,
+          {
+            unitsPerBlister: Number(packaging.unitsPerBlister || 1),
+            blistersPerBox: Number(packaging.blistersPerBox || 1),
+            unitsPerBox: Number(packaging.unitsPerBox || 1),
+          },
+          {
+            unit: !!sellOptions.unit,
+            blister: !!sellOptions.blister,
+            box: !!sellOptions.box,
+          },
+        );
+
+        const newStock = {
+          units: result.remaining.units,
+          blisters: result.remaining.blisters,
+          boxes: result.remaining.boxes,
+        };
+
+        transaction.update(productRef, { stock: newStock, updatedAt: Timestamp.now() });
+      });
+    }
+
+    // 2. Marcar la venta como anulada
+    await updateDoc(saleRef, {
+      revertedAt: Timestamp.now().toDate().toISOString(),
+      revertReason: reason,
+      revertedBy: localStorage.getItem('userEmail') || 'Sistema',
+    });
+
+    // 3. Actualizar contadores del reporte
+    const reportRef = doc(db, 'ubicaciones', ubicacionId, 'reports', reportId);
+    const reportSnap = await getDoc(reportRef);
+    if (reportSnap.exists()) {
+      const reportData = reportSnap.data();
+      const totalItemsReturned = saleData.items.reduce((sum, item) => sum + item.quantity, 0);
+      await updateDoc(reportRef, {
+        totalSales: Math.max(0, (reportData.totalSales || 0) - saleData.total),
+        totalProducts: Math.max(0, (reportData.totalProducts || 0) - totalItemsReturned),
+        updatedAt: Timestamp.now(),
+      });
+    }
+
+    // 4. Registrar en auditoría
+    const { logAuditAction } = await import('../../audit/services/auditService');
+    const productNames = saleData.items.map(i => i.name).join(', ');
+    await logAuditAction(
+      'REVERTIR',
+      'Venta',
+      saleId,
+      `Se revirtió venta de ${saleData.items.length} producto(s) (${productNames}) por un total de Q${saleData.total.toFixed(2)}`,
+      reason
+    );
+  } catch (error: any) {
+    const message = error?.message || 'Error al revertir la venta';
+    toast.error(message);
+    throw error;
+  }
+};
+
+/**
+ * Normaliza el stock de todos los productos de una ubicación.
+ * Compara el stock actual con lo que normalizeFromUnits produciría
+ * y corrige las diferencias.
+ *
+ * @param ubicacionId - ID de la ubicación a normalizar
+ * @returns Objeto con la cantidad de productos corregidos y los que ya estaban bien
+ */
+export const normalizeAllStockService = async (
+  ubicacionId: string
+): Promise<{ corrected: number; alreadyCorrect: number; total: number }> => {
+  try {
+    const productsRef = collection(db, 'ubicaciones', ubicacionId, 'products');
+    const snapshot = await getDocs(productsRef);
+
+    let corrected = 0;
+    let alreadyCorrect = 0;
+
+    for (const productDoc of snapshot.docs) {
+      const data = productDoc.data();
+      const stock = data.stock || {};
+      const packaging = data.packaging || {};
+      const sellOptions = data.sellOptions || {};
+
+      const currentUnits = Number(stock.units || 0);
+      const currentBlisters = Number(stock.blisters || 0);
+      const currentBoxes = Number(stock.boxes || 0);
+
+      const normalized = normalizeFromUnits(
+        currentUnits,
+        {
+          unitsPerBlister: Number(packaging.unitsPerBlister || 1),
+          blistersPerBox: Number(packaging.blistersPerBox || 1),
+          unitsPerBox: Number(packaging.unitsPerBox || 1),
+        },
+        {
+          unit: !!sellOptions.unit,
+          blister: !!sellOptions.blister,
+          box: !!sellOptions.box,
+        },
+      );
+
+      if (normalized.blisters !== currentBlisters || normalized.boxes !== currentBoxes) {
+        await updateDoc(productDoc.ref, {
+          stock: {
+            ...stock,
+            boxes: normalized.boxes,
+            blisters: normalized.blisters,
+          },
+          updatedAt: Timestamp.now(),
+        });
+        corrected++;
+      } else {
+        alreadyCorrect++;
+      }
+    }
+
+    return { corrected, alreadyCorrect, total: snapshot.docs.length };
+  } catch (error: any) {
+    const message = error?.message || 'Error al normalizar el stock';
     toast.error(message);
     throw error;
   }

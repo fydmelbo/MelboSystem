@@ -1,8 +1,8 @@
 import { collection, addDoc, Timestamp, query, orderBy, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../../config/firebase';
 
-export type AuditAction = 'CREAR' | 'ACTUALIZAR' | 'ELIMINAR' | 'REACTIVAR';
-export type AuditEntity = 'Usuario' | 'Producto' | 'Ubicación' | 'Autenticación' | 'Promoción' | 'Venta' | 'Transferencia' | 'Categoría' | 'Casa Farmacéutica';
+export type AuditAction = 'CREAR' | 'ACTUALIZAR' | 'ELIMINAR' | 'REACTIVAR' | 'REVERTIR';
+export type AuditEntity = 'Usuario' | 'Producto' | 'Ubicación' | 'Autenticación' | 'Promoción' | 'Venta' | 'Compra' | 'Transferencia' | 'Categoría' | 'Casa Farmacéutica';
 
 export interface AuditLog {
   id?: string;

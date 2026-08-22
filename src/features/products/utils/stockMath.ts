@@ -256,3 +256,25 @@ export function deductUnitsFromStock(
     remaining: normalizeFromUnits(remainingTotal, packaging, sellOptions),
   };
 }
+
+/**
+ * Suma `unitsToAdd` unidades al TOTAL de stock (`stock.units`)
+ * y devuelve el stock resultante re-normalizado. Es la inversa
+ * de `deductUnitsFromStock` — se usa para devolver stock al
+ * revertir una venta.
+ */
+export function increaseUnitsToStock(
+  currentStock: { boxes: number; blisters: number; units: number },
+  unitsToAdd: number,
+  packaging: StockPackaging,
+  sellOptions: StockSellOptions,
+): SaleResult {
+  const totalAvailable = safe(currentStock.units);
+  const toAdd = safe(unitsToAdd);
+  const newTotal = totalAvailable + toAdd;
+
+  return {
+    ok: true,
+    remaining: normalizeFromUnits(newTotal, packaging, sellOptions),
+  };
+}

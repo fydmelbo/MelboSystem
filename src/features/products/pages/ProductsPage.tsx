@@ -8,9 +8,10 @@ import EditProductModal from '../components/EditProductModal';
 import DeleteProductModal from '../components/DeleteProductModal';
 import BulkImportModal from '../components/BulkImportModal';
 import { useProducts } from '../hooks/useProducts';
-import { Plus, FileSpreadsheet, Trash2 } from 'lucide-react';
+import { Plus, FileSpreadsheet, Trash2, RefreshCw } from 'lucide-react';
 import { createProduct, updateProduct, deleteProduct } from '../services/productService';
 import { deleteAllProducts } from '../services/bulkImportService';
+import { normalizeAllStockService } from '../../sales/services/salesService';
 import { toast } from 'react-hot-toast';
 import { Product } from '../types/Product';
 import React from 'react';
@@ -27,6 +28,9 @@ export default function ProductsPage() {
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [showNormalizeModal, setShowNormalizeModal] = useState(false);
+  const [normalizeUbicacion, setNormalizeUbicacion] = useState('');
+  const [isNormalizing, setIsNormalizing] = useState(false);
   const [sortOption, setSortOption] = useState('');
   const [selectedUbicacion, setSelectedUbicacion] = useState<string>('');
   const [ubicaciones, setUbicaciones] = useState<Array<{ _id: string; nombre: string }>>([]);
@@ -196,6 +200,28 @@ export default function ProductsPage() {
     }
   };
 
+  const handleNormalizeStock = async () => {
+    if (!normalizeUbicacion) {
+      toast.error('Seleccione una ubicación');
+      return;
+    }
+    setIsNormalizing(true);
+    try {
+      const result = await normalizeAllStockService(normalizeUbicacion);
+      if (result.corrected > 0) {
+        toast.success(`Stock normalizado: ${result.corrected} producto(s) corregido(s), ${result.alreadyCorrect} ya estaban correctos`);
+      } else {
+        toast.success(`Todos los ${result.total} productos ya tenían el stock normalizado`);
+      }
+      setShowNormalizeModal(false);
+      refreshProducts();
+    } catch (error) {
+      console.error('Error al normalizar stock:', error);
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
+
   return (
     <MainLayout>
       <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
@@ -203,13 +229,22 @@ export default function ProductsPage() {
           <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Productos</h1>
           <div className="flex gap-2 flex-wrap">
             {currentUser?.role === 'admin' && (
-              <button
-                onClick={() => setShowDeleteAllConfirm(true)}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-              >
-                <Trash2 className="h-5 w-5" />
-                <span className="hidden sm:inline">Borrar Todo</span>
-              </button>
+              <>
+                <button
+                  onClick={() => setShowDeleteAllConfirm(true)}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                >
+                  <Trash2 className="h-5 w-5" />
+                  <span className="hidden sm:inline">Borrar Todo</span>
+                </button>
+                <button
+                  onClick={() => setShowNormalizeModal(true)}
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors"
+                >
+                  <RefreshCw className="h-5 w-5" />
+                  <span className="hidden sm:inline">Normalizar Stock</span>
+                </button>
+              </>
             )}
             <button
               onClick={() => setIsBulkImportOpen(true)}
@@ -349,6 +384,64 @@ export default function ProductsPage() {
                   </>
                 ) : (
                   'Sí, eliminar todo'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNormalizeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold text-amber-600 mb-2">Normalizar Stock</h2>
+            <p className="text-gray-600 mb-4">
+              Esta función revisa todos los productos de la ubicación seleccionada y corrige la distribución de stock entre cajas, blisters y unidades según el empaque configurado.
+            </p>
+            <p className="text-gray-500 text-sm mb-4">
+              Útil después de una carga masiva donde el stock se guardó solo en unidades.
+            </p>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ubicación</label>
+              <select
+                value={normalizeUbicacion}
+                onChange={(e) => setNormalizeUbicacion(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400"
+              >
+                <option value="">Seleccione una ubicación</option>
+                {ubicaciones.map((ub) => (
+                  <option key={ub._id} value={ub._id}>{ub.nombre}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowNormalizeModal(false);
+                  setNormalizeUbicacion('');
+                }}
+                disabled={isNormalizing}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleNormalizeStock}
+                disabled={isNormalizing || !normalizeUbicacion}
+                className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isNormalizing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Normalizando...
+                  </>
+                ) : (
+                  'Normalizar Stock'
                 )}
               </button>
             </div>

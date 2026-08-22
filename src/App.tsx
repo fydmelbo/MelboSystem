@@ -16,7 +16,9 @@ import PromotionsPage from './features/promotions/pages/PromotionsPage';
 import { AuthProvider } from './features/auth/context/AuthContext';
 import ProtectedRoute from './features/auth/components/ProtectedRoute';
 import UsersPage from './features/users/pages/UsersPage';
+import ProfilePage from './features/users/pages/ProfilePage';
 import AuditoriaPage from './features/audit/pages/AuditoriaPage';
+import PurchasesPage from './features/purchases/pages/PurchasesPage';
 
 function App() {
   return (
@@ -48,6 +50,11 @@ function App() {
           <Route path="/sales" element={
             <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion', 'employee']} requireLocation={true}>
               <SalesPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/purchases" element={
+            <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion']}>
+              <PurchasesPage />
             </ProtectedRoute>
           } />
           <Route path="/reports" element={
@@ -83,6 +90,11 @@ function App() {
           <Route path="/users" element={
             <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion']}>
               <UsersPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/profile" element={
+            <ProtectedRoute allowedRoles={['admin', 'admin_ubicacion', 'employee']}>
+              <ProfilePage />
             </ProtectedRoute>
           } />
           <Route path="/auditoria" element={

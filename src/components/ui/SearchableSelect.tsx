@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Check, Search, X } from 'lucide-react';
+import { ChevronDown, Check, Search, X, Plus } from 'lucide-react';
 
 interface Option {
   value: string;
@@ -20,6 +20,8 @@ interface SearchableSelectProps {
   required?: boolean;
   disabled?: boolean;
   className?: string;
+  allowCustom?: boolean;
+  customLabel?: string;
 }
 
 export default function SearchableSelect({
@@ -33,6 +35,8 @@ export default function SearchableSelect({
   required = false,
   disabled = false,
   className = '',
+  allowCustom = false,
+  customLabel,
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -114,7 +118,7 @@ export default function SearchableSelect({
     setSearch('');
   };
 
-  const showSearch = options.length > 5;
+  const showSearch = allowCustom || options.length > 5;
 
   return (
     <div className={`relative ${className}`} ref={containerRef}>
@@ -151,11 +155,11 @@ export default function SearchableSelect({
           focus:outline-none
         `}
       >
-        <span className={`truncate ${selectedOption ? 'text-gray-900' : 'text-gray-400'}`}>
-          {selectedOption ? selectedOption.label : placeholder}
+        <span className={`truncate ${selectedOption ? 'text-gray-900' : value ? 'text-gray-900' : 'text-gray-400'}`}>
+          {selectedOption ? selectedOption.label : value || placeholder}
         </span>
         <div className="flex items-center gap-1 shrink-0">
-          {selectedOption && !disabled && (
+          {value && !disabled && (
             <span
               onClick={handleClear}
               className="p-0.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
@@ -213,9 +217,27 @@ export default function SearchableSelect({
 
             <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto py-1">
               {filteredOptions.length === 0 ? (
-                <div className="px-3 py-6 text-center text-sm text-gray-500">
-                  No se encontraron resultados
-                </div>
+                allowCustom && search.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(search.trim())}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-left text-teal-700 hover:bg-teal-50 transition-colors"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">
+                        {customLabel || `Agregar "${search.trim()}"`}
+                      </div>
+                      <div className="truncate text-xs text-teal-500 mt-0.5">
+                        No encontrado en inventario — se agregará como nuevo
+                      </div>
+                    </div>
+                  </button>
+                ) : (
+                  <div className="px-3 py-6 text-center text-sm text-gray-500">
+                    No se encontraron resultados
+                  </div>
+                )
               ) : (
                 filteredOptions.map((option) => (
                   <button

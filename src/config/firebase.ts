@@ -2,6 +2,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Los encuentras en: Firebase Console > Configuración del proyecto > Tus apps > SDK de Firebase
 const firebaseConfig = {
@@ -17,7 +18,8 @@ const firebaseConfig = {
 // Inicializar Firebase
 const app = initializeApp(firebaseConfig);
 
-// Exportar instancias de Auth y Firestore
+// Exportar instancias de Auth, Firestore y Storage
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 export default app;

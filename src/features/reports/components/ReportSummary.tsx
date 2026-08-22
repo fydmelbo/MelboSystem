@@ -1,5 +1,5 @@
 import React from 'react';
-import { Report } from '../types/Report';
+import { Report, Sale } from '../types/Report';
 import SaleDetails from './SaleDetails';
 import { toDate } from '../../../lib/timezone';
 
@@ -7,9 +7,11 @@ interface ReportSummaryProps {
   report: Report;
   ubicaciones?: Array<{ _id: string; nombre: string }>;
   isAdmin?: boolean;
+  onRevertSale?: (sale: Sale) => void;
+  canRevert?: boolean;
 }
 
-export default function ReportSummary({ report, ubicaciones = [], isAdmin = false }: ReportSummaryProps) {
+export default function ReportSummary({ report, ubicaciones = [], isAdmin = false, onRevertSale, canRevert = false }: ReportSummaryProps) {
   const sortedSales = [...report.sales].sort((a, b) => 
     toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime()
   );
@@ -87,10 +89,12 @@ export default function ReportSummary({ report, ubicaciones = [], isAdmin = fals
         {sortedSales.length > 0 ? (
           sortedSales.map((sale, index) => (
             <SaleDetails 
-              key={index} 
+              key={sale._id || index} 
               sale={sale} 
               index={index}
               ubicacionName={isAdmin ? (ubicacionMap.get(sale.ubicacion || '') || undefined) : undefined}
+              onRevert={onRevertSale}
+              canRevert={canRevert}
             />
           ))
         ) : (
