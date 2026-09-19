@@ -1,6 +1,6 @@
 import {
   Home, Pill, Users, ShoppingCart, FileText, LayoutDashboard,
-  History, Truck, Pin, MapPin, AlertTriangle, User,
+  History, Truck, Pin, MapPin, AlertTriangle,
   LayoutGrid, BarChart3, Settings, Package
 } from 'lucide-react';
 import React from 'react';
@@ -71,9 +71,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
     ...(role === 'admin' ? [{ icon: Users, label: 'Usuarios', path: '/users', color: 'text-rose-500' }] : []),
     ...(role === 'admin_ubicacion' ? [
       { icon: Users, label: 'Usuarios', path: '/users', color: 'text-rose-500' },
-      { icon: User, label: 'Perfil', path: '/profile', color: 'text-violet-500' },
     ] : []),
-    ...(role === 'employee' ? [{ icon: User, label: 'Perfil', path: '/profile', color: 'text-violet-500' }] : []),
     // Ubicaciones
     ...(role === 'admin' ? [{ icon: MapPin, label: 'Ubicaciones', path: '/ubicaciones', color: 'text-green-500' }] : []),
     // Revisión

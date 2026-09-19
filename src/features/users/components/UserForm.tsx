@@ -59,9 +59,11 @@ export default function UserForm({ open, onClose, onSubmit, user, ubicaciones }:
     onSubmit(formData);
   };
 
+  const isEditingSelf = user?.id === currentUser?.uid;
+
   const availableRoles = currentUser?.role === 'admin'
     ? ['admin', 'admin_ubicacion', 'employee']
-    : ['admin_ubicacion', 'employee'];
+    : ['employee'];
 
   const roleOptions = availableRoles.map(role => ({
     value: role,
@@ -128,6 +130,7 @@ export default function UserForm({ open, onClose, onSubmit, user, ubicaciones }:
           value={formData.role}
           onChange={handleChange}
           required
+          disabled={isEditingSelf && currentUser?.role !== 'admin'}
         />
 
         {(formData.role === 'employee' || formData.role === 'admin_ubicacion') && (
